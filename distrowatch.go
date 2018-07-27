@@ -1,4 +1,4 @@
-package distrowatch
+package main
 
 import (
 	"database/sql"

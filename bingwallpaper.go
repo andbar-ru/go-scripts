@@ -38,7 +38,7 @@ var (
 
 func check(err error) {
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 }
 
@@ -52,7 +52,7 @@ func downloadWallpaper(date time.Time) (string, string) {
 	check(err)
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		log.Fatalf("status code error: %d %s", res.StatusCode, res.Status)
+		log.Panicf("status code error: %d %s", res.StatusCode, res.Status)
 	}
 
 	// Parse the page and fetch the image metadata
@@ -62,7 +62,7 @@ func downloadWallpaper(date time.Time) (string, string) {
 	if imgContainers.Length() == 0 {
 		photos := root.Find("#photos")
 		if photos.Text() != "\n' title='Previous' hidefocus='true' target='_self' class='nph_btn_pphoto' id='photoPrev'>" {
-			log.Fatalf("photos have unexpected text: %s", photos.Text())
+			log.Panicf("photos have unexpected text: %s", photos.Text())
 		}
 		title = "There is no wallpaper on this date"
 		return filename, title
@@ -72,7 +72,7 @@ func downloadWallpaper(date time.Time) (string, string) {
 	img := imgContainer.Find("img").First()
 	title, ok := img.Attr("title")
 	if !ok {
-		log.Fatal("img has not attribute 'title'")
+		log.Panic("img has not attribute 'title'")
 	}
 	copyrightIndex := strings.LastIndex(title, "(©")
 	if copyrightIndex != -1 {
@@ -80,7 +80,7 @@ func downloadWallpaper(date time.Time) (string, string) {
 	}
 	src, ok := img.Attr("src")
 	if !ok {
-		log.Fatal("img has not attribute 'src'")
+		log.Panic("img has not attribute 'src'")
 	}
 	src = strings.TrimLeft(src, "/")
 	if !strings.HasPrefix(src, "https://") {
@@ -96,17 +96,17 @@ func downloadWallpaper(date time.Time) (string, string) {
 	// Download image
 	output, err := os.Create(filepath)
 	if err != nil {
-		log.Fatalf("Could not create file %s, err: %s", filepath, err)
+		log.Panicf("Could not create file %s, err: %s", filepath, err)
 	}
 	defer output.Close()
 	response, err := http.Get(src)
 	if err != nil {
-		log.Fatalf("Could not download image from %s, err: %s", src, err)
+		log.Panicf("Could not download image from %s, err: %s", src, err)
 	}
 	defer response.Body.Close()
 	_, err = io.Copy(output, response.Body)
 	if err != nil {
-		log.Fatalf("Could not write image to file, err: %s", err)
+		log.Panicf("Could not write image to file, err: %s", err)
 	}
 
 	return filename, title

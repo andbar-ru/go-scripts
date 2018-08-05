@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	BASE_URL   = "https://bingwallpaper.com"
-	RESOLUTION = "1920x1080"
-	LAYOUT     = "20060102"
+	BASE_URL       = "https://bingwallpaper.com"
+	RESOLUTION     = "1920x1080"
+	LAYOUT         = "20060102"
+	COPYRIGHT_TEXT = "- Bing™ Wallpaper Gallery"
 )
 
 var (
@@ -70,11 +71,12 @@ func downloadWallpaper(date time.Time) (string, string) {
 
 	imgContainer := imgContainers.First()
 	img := imgContainer.Find("img").First()
-	title, ok := img.Attr("title")
-	if !ok {
-		log.Panic("img has not attribute 'title'")
+	titleTag := root.Find("title").First()
+	if titleTag.Length() == 0 {
+		log.Panicf("Page on url %s hasn't title tag", url)
 	}
-	copyrightIndex := strings.LastIndex(title, "(©")
+	title = titleTag.Text()
+	copyrightIndex := strings.Index(title, COPYRIGHT_TEXT)
 	if copyrightIndex != -1 {
 		title = strings.Trim(title[:copyrightIndex], " ")
 	}
@@ -127,6 +129,8 @@ func setWallpaper(filename, title string) {
 
 // Save record about wallpaper into file.
 func logWallpaper(date time.Time, filename, title string) {
+	// Escape single quotes for sed.
+	title = strings.Replace(title, "'", `\x27`, -1)
 	line := fmt.Sprintf("%s %s %s\\n", date.Format(LAYOUT), filename, title)
 	sedCmd := exec.Command("sed", "-i", fmt.Sprintf("1s;^;%s;", line), WP_FILE)
 	err := sedCmd.Start()

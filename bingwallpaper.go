@@ -93,7 +93,6 @@ func downloadWallpaper(date time.Time) (string, string) {
 	lastSlashIndex := strings.LastIndex(src, "/")
 	filename = src[lastSlashIndex+1:]
 	filepath := fmt.Sprintf("%s/%s", IMG_DIR, filename)
-	fmt.Println(filepath)
 
 	// Download image
 	output, err := os.Create(filepath)

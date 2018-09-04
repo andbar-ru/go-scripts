@@ -35,12 +35,12 @@ func AverageColor(img image.Image) color.NRGBA {
 	clrs := &colors{reds: 0, greens: 0, blues: 0, alphas: 0}
 
 	var wg sync.WaitGroup
-	wg.Add(bounds.Max.X)
-	for x := 0; x < bounds.Max.X; x++ {
-		go func(x int) {
+	wg.Add(bounds.Max.Y)
+	for y := 0; y < bounds.Max.Y; y++ {
+		go func(y int) {
 			defer wg.Done()
 			var reds, greens, blues, alphas uint64
-			for y := 0; y < bounds.Max.Y; y++ {
+			for x := 0; x < bounds.Max.X; x++ {
 				red, green, blue, alpha := img.At(x, y).RGBA()
 				reds += uint64(red)
 				greens += uint64(green)
@@ -48,7 +48,7 @@ func AverageColor(img image.Image) color.NRGBA {
 				alphas += uint64(alpha)
 			}
 			clrs.Inc(reds, greens, blues, alphas)
-		}(x)
+		}(y)
 	}
 	wg.Wait()
 

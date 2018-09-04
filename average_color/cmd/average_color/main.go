@@ -25,7 +25,7 @@ func main() {
 	imagePath := os.Args[1]
 
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		fmt.Printf("file %s doen not exist\n", imagePath)
+		fmt.Printf("file %s does not exist\n", imagePath)
 		os.Exit(1)
 	}
 
@@ -37,6 +37,7 @@ func main() {
 
 	averageColor := average_color.AverageColor(img)
 
+	fmt.Println(imagePath)
 	if averageColor.A == 0xff {
 		fmt.Printf("#%02x%02x%02x\n", averageColor.R, averageColor.G, averageColor.B)
 	} else {

@@ -12,40 +12,45 @@ import (
 )
 
 type colors struct {
-	mux    sync.Mutex
-	reds   uint64
-	greens uint64
-	blues  uint64
-	alphas uint64
+	mux sync.Mutex
+	// sum of color values ∈ [0,255]
+	redSum   float64
+	greenSum float64
+	blueSum  float64
+	alphaSum float64
 }
 
-func (c *colors) Inc(r, g, b, a uint64) {
+func (c *colors) Inc(r, g, b, a float64) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
-	c.reds += r
-	c.greens += g
-	c.blues += b
-	c.alphas += a
+	c.redSum += r
+	c.greenSum += g
+	c.blueSum += b
+	c.alphaSum += a
 }
 
 func AverageColor(img image.Image) color.NRGBA {
 	bounds := img.Bounds()
 	pxNumber := bounds.Max.X * bounds.Max.Y
-	clrs := &colors{reds: 0, greens: 0, blues: 0, alphas: 0}
+	clrs := &colors{}
 
 	var wg sync.WaitGroup
 	wg.Add(bounds.Max.Y)
 	for y := 0; y < bounds.Max.Y; y++ {
 		go func(y int) {
 			defer wg.Done()
-			var reds, greens, blues, alphas uint64
+			var reds, greens, blues, alphas float64
 			for x := 0; x < bounds.Max.X; x++ {
-				red, green, blue, alpha := img.At(x, y).RGBA()
-				reds += uint64(red)
-				greens += uint64(green)
-				blues += uint64(blue)
-				alphas += uint64(alpha)
+				redAP, greenAP, blueAP, alphaAP := img.At(x, y).RGBA() // alpha-premultiplied values
+				red := float64(redAP*0xff) / float64(alphaAP)
+				green := float64(greenAP*0xff) / float64(alphaAP)
+				blue := float64(blueAP*0xff) / float64(alphaAP)
+				alpha := float64(alphaAP * 0xff / 0xffff)
+				reds += red
+				greens += green
+				blues += blue
+				alphas += alpha
 			}
 			clrs.Inc(reds, greens, blues, alphas)
 		}(y)
@@ -53,11 +58,10 @@ func AverageColor(img image.Image) color.NRGBA {
 	wg.Wait()
 
 	var red, green, blue, alpha uint8
-	k := uint64(0xffff / 0xff)
-	red = uint8(math.Round(float64(clrs.reds/k) / float64(pxNumber)))
-	green = uint8(math.Round(float64(clrs.greens/k) / float64(pxNumber)))
-	blue = uint8(math.Round(float64(clrs.blues/k) / float64(pxNumber)))
-	alpha = uint8(math.Round(float64(clrs.alphas/k) / float64(pxNumber)))
+	red = uint8(math.Round(clrs.redSum / float64(pxNumber)))
+	green = uint8(math.Round(clrs.greenSum / float64(pxNumber)))
+	blue = uint8(math.Round(clrs.blueSum / float64(pxNumber)))
+	alpha = uint8(math.Round(clrs.alphaSum / float64(pxNumber)))
 
 	return color.NRGBA{red, green, blue, alpha}
 }

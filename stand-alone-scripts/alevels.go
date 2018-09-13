@@ -16,14 +16,17 @@ const (
 func main() {
 	results := make(map[int]int)
 	rand.Seed(time.Now().UnixNano())
+
 	for i := 0; i < N; i++ {
 		n := 1
+		threshold := 0.99
 		for {
-			if r := rand.Intn(10); r == 0 {
+			if r := rand.Float64(); r > threshold {
 				results[n]++
 				break
 			}
 			n++
+			threshold *= 0.99
 		}
 	}
 	printResults(results)

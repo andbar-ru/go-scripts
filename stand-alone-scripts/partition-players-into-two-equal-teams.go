@@ -30,60 +30,60 @@ func (p *Player) String() string {
 
 var (
 	// Все игроки
-	allPlayers = []Player{
+	allPlayers = []*Player{
 		// Мужчины
-		Player{name: "Авдей", gender: 'M', strength: 0.5},
-		Player{name: "Богдан", gender: 'M', strength: 0.6},
-		Player{name: "Вадим", gender: 'M', strength: 0.5},
-		Player{name: "Гавриил", gender: 'M', strength: 0.7},
-		Player{name: "Даниил", gender: 'M', strength: 0.6},
-		Player{name: "Евгений", gender: 'M', strength: 0.7},
-		Player{name: "Ждан", gender: 'M', strength: 0.4},
-		Player{name: "Зиновий", gender: 'M', strength: 0.7},
-		Player{name: "Иакинф", gender: 'M', strength: 0.6},
-		Player{name: "Касьян", gender: 'M', strength: 0.6},
-		Player{name: "Лаврентий", gender: 'M', strength: 0.9},
-		Player{name: "Магистриан", gender: 'M', strength: 1.0},
-		Player{name: "Назар", gender: 'M', strength: 0.5},
-		Player{name: "Олег", gender: 'M', strength: 0.4},
-		Player{name: "Павел", gender: 'M', strength: 0.5},
-		Player{name: "Разумник", gender: 'M', strength: 0.8},
-		Player{name: "Савва", gender: 'M', strength: 0.5},
-		Player{name: "Тарас", gender: 'M', strength: 0.5},
-		Player{name: "Фаддей", gender: 'M', strength: 0.6},
-		Player{name: "Харитон", gender: 'M', strength: 0.7},
-		Player{name: "Эдуард", gender: 'M', strength: 0.6},
-		Player{name: "Юлиан", gender: 'M', strength: 0.5},
-		Player{name: "Яков", gender: 'M', strength: 0.4},
+		&Player{name: "Авдей", gender: 'M', strength: 0.5},
+		&Player{name: "Богдан", gender: 'M', strength: 0.6},
+		&Player{name: "Вадим", gender: 'M', strength: 0.5},
+		&Player{name: "Гавриил", gender: 'M', strength: 0.7},
+		&Player{name: "Даниил", gender: 'M', strength: 0.6},
+		&Player{name: "Евгений", gender: 'M', strength: 0.7},
+		&Player{name: "Ждан", gender: 'M', strength: 0.4},
+		&Player{name: "Зиновий", gender: 'M', strength: 0.7},
+		&Player{name: "Иакинф", gender: 'M', strength: 0.6},
+		&Player{name: "Касьян", gender: 'M', strength: 0.6},
+		&Player{name: "Лаврентий", gender: 'M', strength: 0.9},
+		&Player{name: "Магистриан", gender: 'M', strength: 1.0},
+		&Player{name: "Назар", gender: 'M', strength: 0.5},
+		&Player{name: "Олег", gender: 'M', strength: 0.4},
+		&Player{name: "Павел", gender: 'M', strength: 0.5},
+		&Player{name: "Разумник", gender: 'M', strength: 0.8},
+		&Player{name: "Савва", gender: 'M', strength: 0.5},
+		&Player{name: "Тарас", gender: 'M', strength: 0.5},
+		&Player{name: "Фаддей", gender: 'M', strength: 0.6},
+		&Player{name: "Харитон", gender: 'M', strength: 0.7},
+		&Player{name: "Эдуард", gender: 'M', strength: 0.6},
+		&Player{name: "Юлиан", gender: 'M', strength: 0.5},
+		&Player{name: "Яков", gender: 'M', strength: 0.4},
 		// Женщины
-		Player{name: "Агафья", gender: 'F', strength: 0.4},
-		Player{name: "Валентина", gender: 'F', strength: 0.1},
-		Player{name: "Галина", gender: 'F', strength: 0.4},
-		Player{name: "Дана", gender: 'F', strength: 0.6},
-		Player{name: "Евгения", gender: 'F', strength: 0.3},
-		Player{name: "Жанна", gender: 'F', strength: 0.5},
-		Player{name: "Зинаида", gender: 'F', strength: 0.3},
-		Player{name: "Инга", gender: 'F', strength: 0.6},
-		Player{name: "Карина", gender: 'F', strength: 0.4},
-		Player{name: "Лада", gender: 'F', strength: 0.6},
-		Player{name: "Маргарита", gender: 'F', strength: 0.1},
-		Player{name: "Надежда", gender: 'F', strength: 0.3},
-		Player{name: "Оксана", gender: 'F', strength: 0.4},
-		Player{name: "Пелагея", gender: 'F', strength: 0.3},
-		Player{name: "Рада", gender: 'F', strength: 0.6},
-		Player{name: "Светлана", gender: 'F', strength: 0.2},
-		Player{name: "Таисия", gender: 'F', strength: 0.4},
-		Player{name: "Ульяна", gender: 'F', strength: 0.4},
-		Player{name: "Фаина", gender: 'F', strength: 0.5},
-		Player{name: "Целестина", gender: 'F', strength: 0.1},
-		Player{name: "Юлия", gender: 'F', strength: 0.6},
-		Player{name: "Яна", gender: 'F', strength: 0.7},
+		&Player{name: "Агафья", gender: 'F', strength: 0.4},
+		&Player{name: "Валентина", gender: 'F', strength: 0.1},
+		&Player{name: "Галина", gender: 'F', strength: 0.4},
+		&Player{name: "Дана", gender: 'F', strength: 0.6},
+		&Player{name: "Евгения", gender: 'F', strength: 0.3},
+		&Player{name: "Жанна", gender: 'F', strength: 0.5},
+		&Player{name: "Зинаида", gender: 'F', strength: 0.3},
+		&Player{name: "Инга", gender: 'F', strength: 0.6},
+		&Player{name: "Карина", gender: 'F', strength: 0.4},
+		&Player{name: "Лада", gender: 'F', strength: 0.6},
+		&Player{name: "Маргарита", gender: 'F', strength: 0.1},
+		&Player{name: "Надежда", gender: 'F', strength: 0.3},
+		&Player{name: "Оксана", gender: 'F', strength: 0.4},
+		&Player{name: "Пелагея", gender: 'F', strength: 0.3},
+		&Player{name: "Рада", gender: 'F', strength: 0.6},
+		&Player{name: "Светлана", gender: 'F', strength: 0.2},
+		&Player{name: "Таисия", gender: 'F', strength: 0.4},
+		&Player{name: "Ульяна", gender: 'F', strength: 0.4},
+		&Player{name: "Фаина", gender: 'F', strength: 0.5},
+		&Player{name: "Целестина", gender: 'F', strength: 0.1},
+		&Player{name: "Юлия", gender: 'F', strength: 0.6},
+		&Player{name: "Яна", gender: 'F', strength: 0.7},
 	}
-	dayPlayers [12]Player // игроки в текущий день
+	dayPlayers [12]*Player // игроки в текущий день
 )
 
 // getPlayersRatingSum возвращает сумму рейтингов списка игроков.
-func getPlayersRatingSum(players []Player) float64 {
+func getPlayersRatingSum(players []*Player) float64 {
 	var sum float64
 	for _, player := range players {
 		sum += player.getRating()
@@ -91,11 +91,22 @@ func getPlayersRatingSum(players []Player) float64 {
 	return sum
 }
 
+// getPlayersStrengthSum возвращает сумму сил списка игроков.
+func getPlayersStrengthSum(players []*Player) float64 {
+	var sum float64
+	for _, player := range players {
+		sum += player.strength
+	}
+	return sum
+}
+
 type TeamPair struct {
-	team1 []Player
-	sum1  float64
-	team2 []Player
-	sum2  float64
+	team1        []*Player
+	ratingSum1   float64
+	strengthSum1 float64
+	team2        []*Player
+	ratingSum2   float64
+	strengthSum2 float64
 }
 
 func (tp *TeamPair) String() string {
@@ -111,14 +122,16 @@ func (tp *TeamPair) String() string {
 	return s
 }
 
-// sumDiff возвращает разницу сумм рейтингов игроков команд.
-func (tp *TeamPair) sumDiff() float64 {
-	return math.Abs(tp.sum1 - tp.sum2)
+// ratingSumDiff возвращает разницу сумм рейтингов игроков команд.
+func (tp *TeamPair) ratingSumDiff() float64 {
+	return math.Abs(tp.ratingSum1 - tp.ratingSum2)
 }
 
 // play играет игру и записывает результаты.
 func (tp *TeamPair) play() {
-	threshold := tp.sum1 / (tp.sum1 / tp.sum2) // шансы первой команды победить в отдельно взятой игре
+	// Шансы первой команды победить в отдельно взятой игре
+	threshold := tp.strengthSum1 / (tp.strengthSum1 + tp.strengthSum2)
+	fmt.Println(threshold)
 	team1Won := rand.Float64() < threshold
 	// Обновляем статистику игроков в зависимости от результата игры.
 	for _, player := range tp.team1 {
@@ -143,9 +156,9 @@ func pickDayPlayers() {
 	}
 }
 
-// getMoreEqualTeamPair возвращает ту пару команд, где разница между командами меньше.
+// getMoreEqualTeamPair возвращает ту пару команд, где разница между суммарными рейтингами команд меньше.
 func getMoreEqualTeamPair(tp1, tp2 TeamPair) TeamPair {
-	if tp1.sumDiff() <= tp2.sumDiff() {
+	if tp1.ratingSumDiff() <= tp2.ratingSumDiff() {
 		return tp1
 	} else {
 		return tp2
@@ -158,18 +171,40 @@ func findEqualTeamPair(tp TeamPair, i int) TeamPair {
 	if len(tp.team1) == len(dayPlayers)/2 || len(tp.team2) == len(dayPlayers)/2 {
 		if len(tp.team1) == len(dayPlayers)/2 {
 			tp.team2 = append(tp.team2, dayPlayers[i:]...)
-			tp.sum2 += getPlayersRatingSum(dayPlayers[i:])
+			tp.ratingSum2 += getPlayersRatingSum(dayPlayers[i:])
+			tp.strengthSum2 += getPlayersStrengthSum(dayPlayers[i:])
 		} else {
 			tp.team1 = append(tp.team1, dayPlayers[i:]...)
-			tp.sum1 += getPlayersRatingSum(dayPlayers[i:])
+			tp.ratingSum1 += getPlayersRatingSum(dayPlayers[i:])
+			tp.strengthSum1 += getPlayersStrengthSum(dayPlayers[i:])
 		}
 		return tp
 	}
 
 	// Каждого из dayPlayers мы можем сунуть либо в одну либо в другую команду. Надо найти лучший вариант из двух.
 	return getMoreEqualTeamPair(
-		findEqualTeamPair(TeamPair{append(tp.team1, dayPlayers[i]), tp.sum1 + dayPlayers[i].getRating(), append([]Player{}, tp.team2...), tp.sum2}, i+1),
-		findEqualTeamPair(TeamPair{append([]Player{}, tp.team1...), tp.sum1, append(tp.team2, dayPlayers[i]), tp.sum2 + dayPlayers[i].getRating()}, i+1),
+		findEqualTeamPair(
+			TeamPair{
+				append(tp.team1, dayPlayers[i]),
+				tp.ratingSum1 + dayPlayers[i].getRating(),
+				tp.strengthSum1 + dayPlayers[i].strength,
+				append([]*Player{}, tp.team2...),
+				tp.ratingSum2,
+				tp.strengthSum2,
+			},
+			i+1,
+		),
+		findEqualTeamPair(
+			TeamPair{
+				append([]*Player{}, tp.team1...),
+				tp.ratingSum1,
+				tp.strengthSum1,
+				append(tp.team2, dayPlayers[i]),
+				tp.ratingSum2 + dayPlayers[i].getRating(),
+				tp.strengthSum2 + dayPlayers[i].strength,
+			},
+			i+1,
+		),
 	)
 }
 
@@ -181,10 +216,9 @@ func main() {
 	pickDayPlayers()
 
 	// Разделить игроков на 2 равные макисмально близкие по среднему рейтингу команды.
-	teamPair := findEqualTeamPair(TeamPair{[]Player{}, 0, []Player{}, 0}, 0)
+	teamPair := findEqualTeamPair(TeamPair{[]*Player{}, 0, 0, []*Player{}, 0, 0}, 0)
 	fmt.Println(teamPair.String())
 
 	teamPair.play()
-
 	fmt.Println(teamPair.String())
 }

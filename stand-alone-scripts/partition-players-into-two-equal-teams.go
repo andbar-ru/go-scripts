@@ -9,23 +9,59 @@ import (
 	"math/rand"
 )
 
+func getPercent(dividend, divider int) float64 {
+	if divider == 0 {
+		return 0
+	}
+	return float64(divider*100) / float64(dividend)
+}
+
 type Player struct {
 	name     string
 	gender   rune
 	strength float64
-	games    int
-	wins     int
+	games    [2]int // всего и выигранных
 }
 
-func (p *Player) getRating() float64 {
-	if p.games == 0 {
+func (p *Player) getSuccessRate() float64 {
+	if p.games[0] == 0 {
 		return 0.0
 	}
-	return float64(p.wins) / float64(p.games)
+	return float64(p.games[1]) / float64(p.games[0])
 }
 
-func (p *Player) String() string {
-	return fmt.Sprintf("%s: сила %.1f, кол-во игр %d, кол-во побед %d, результативность %.2f\n", p.name, p.strength, p.games, p.wins, p.getRating())
+func (p Player) String() string {
+	return fmt.Sprintf("%s: сила %.1f, кол-во игр %d, кол-во побед %d, успешность %.2f\n", p.name, p.strength, p.games[0], p.games[1], p.getSuccessRate())
+}
+
+type Stats struct {
+	games int
+	days  int
+	// Игры команд из пар по признакам: всего и выигранных:
+	// по силе:
+	moreStrongTeamGames  [2]int
+	lessStrongTeamGames  [2]int
+	equalStrongTeamGames [2]int
+	// по успешности -- доле выигранных игр:
+	moreSuccessfulTeamGames  [2]int
+	lessSuccessfulTeamGames  [2]int
+	equalSuccessfulTeamGames [2]int
+}
+
+func (s Stats) String() string {
+	str := fmt.Sprintf("Количество игр: %d\n", s.games)
+	str += fmt.Sprintf("Количество дней: %d\n", s.days)
+
+	str += fmt.Sprintln("Статистика команд по признакам:")
+	str += fmt.Sprintf("  более сильные: %d из %d (%.1f %%)\n", s.moreStrongTeamGames[1], s.moreStrongTeamGames[0], getPercent(s.moreStrongTeamGames[0], s.moreStrongTeamGames[1]))
+	str += fmt.Sprintf("  менее сильные: %d из %d (%.1f %%)\n", s.lessStrongTeamGames[1], s.lessStrongTeamGames[0], getPercent(s.lessStrongTeamGames[0], s.lessStrongTeamGames[1]))
+	str += fmt.Sprintf("  равные по силе: %d из %d (%.1f %%)\n", s.equalStrongTeamGames[1], s.equalStrongTeamGames[0], getPercent(s.equalStrongTeamGames[0], s.equalStrongTeamGames[1]))
+	str += "\n"
+	str += fmt.Sprintf("  более успешные: %d из %d (%.1f %%)\n", s.moreSuccessfulTeamGames[1], s.moreSuccessfulTeamGames[0], getPercent(s.moreSuccessfulTeamGames[0], s.moreSuccessfulTeamGames[1]))
+	str += fmt.Sprintf("  менее успешные: %d из %d (%.1f %%)\n", s.lessSuccessfulTeamGames[1], s.lessSuccessfulTeamGames[0], getPercent(s.lessSuccessfulTeamGames[0], s.lessSuccessfulTeamGames[1]))
+	str += fmt.Sprintf("  равные по успеху: %d из %d (%.1f %%)\n", s.equalSuccessfulTeamGames[1], s.equalSuccessfulTeamGames[0], getPercent(s.equalSuccessfulTeamGames[0], s.equalSuccessfulTeamGames[1]))
+
+	return str
 }
 
 var (
@@ -80,13 +116,14 @@ var (
 		&Player{name: "Яна", gender: 'F', strength: 0.7},
 	}
 	dayPlayers [12]*Player // игроки в текущий день
+	stats      = Stats{}
 )
 
-// getPlayersRatingSum возвращает сумму рейтингов списка игроков.
-func getPlayersRatingSum(players []*Player) float64 {
+// getPlayersSuccessRateSum возвращает сумму рейтингов списка игроков.
+func getPlayersSuccessRateSum(players []*Player) float64 {
 	var sum float64
 	for _, player := range players {
-		sum += player.getRating()
+		sum += player.getSuccessRate()
 	}
 	return sum
 }
@@ -102,48 +139,107 @@ func getPlayersStrengthSum(players []*Player) float64 {
 
 type TeamPair struct {
 	team1        []*Player
-	ratingSum1   float64
+	successSum1  float64
 	strengthSum1 float64
 	team2        []*Player
-	ratingSum2   float64
+	successSum2  float64
 	strengthSum2 float64
 }
 
-func (tp *TeamPair) String() string {
+func (tp TeamPair) String() string {
 	s := "Команда 1\n"
 	for _, player := range tp.team1 {
-		s += player.String()
+		s += fmt.Sprint(player)
 	}
 	s += "\n"
 	s += "Команда 2\n"
 	for _, player := range tp.team2 {
-		s += player.String()
+		s += fmt.Sprint(player)
 	}
 	return s
 }
 
 // ratingSumDiff возвращает разницу сумм рейтингов игроков команд.
 func (tp *TeamPair) ratingSumDiff() float64 {
-	return math.Abs(tp.ratingSum1 - tp.ratingSum2)
+	return math.Abs(tp.successSum1 - tp.successSum2)
 }
 
 // play играет игру и записывает результаты.
 func (tp *TeamPair) play() {
-	// Шансы первой команды победить в отдельно взятой игре
-	threshold := tp.strengthSum1 / (tp.strengthSum1 + tp.strengthSum2)
-	fmt.Println(threshold)
-	team1Won := rand.Float64() < threshold
-	// Обновляем статистику игроков в зависимости от результата игры.
-	for _, player := range tp.team1 {
-		player.games++
-		if team1Won {
-			player.wins++
+	// Более и менее сильные и более и менее успешные команды.
+	var moreStrongTeam, lessStrongTeam, moreSuccessfulTeam, lessSuccessfulTeam []*Player
+	if tp.strengthSum1 != tp.strengthSum2 {
+		if tp.strengthSum1 > tp.strengthSum2 {
+			moreStrongTeam = tp.team1
+			lessStrongTeam = tp.team2
+		} else {
+			moreStrongTeam = tp.team2
+			lessStrongTeam = tp.team1
 		}
 	}
+	if tp.successSum1 != tp.successSum2 {
+		if tp.successSum1 > tp.successSum2 {
+			moreSuccessfulTeam = tp.team1
+			lessSuccessfulTeam = tp.team2
+		} else {
+			moreSuccessfulTeam = tp.team2
+			lessSuccessfulTeam = tp.team1
+		}
+	}
+
+	// Шансы первой команды победить в отдельно взятой игре.
+	threshold := tp.strengthSum1 / (tp.strengthSum1 + tp.strengthSum2)
+	team1Won := rand.Float64() < threshold
+
+	/* Обновляем статистику. */
+	// Независимую от результата игры.
+	stats.games++
+	// По силе.
+	if moreStrongTeam == nil && lessStrongTeam == nil {
+		stats.equalStrongTeamGames[0] += 2 // игры у каждой команды
+		stats.equalStrongTeamGames[1] += 1 // победа только у одной
+	} else {
+		stats.moreStrongTeamGames[0]++
+		stats.lessStrongTeamGames[0]++
+	}
+	// По успеху.
+	if moreSuccessfulTeam == nil && lessSuccessfulTeam == nil {
+		stats.equalSuccessfulTeamGames[0] += 2 // игры у каждой команды
+		stats.equalSuccessfulTeamGames[1] += 1 // победа только у одной
+	} else {
+		stats.moreSuccessfulTeamGames[0]++
+		stats.lessSuccessfulTeamGames[0]++
+	}
+	// Обновляем счётчик сыгранных игр обеих команд.
+	for _, player := range tp.team1 {
+		player.games[0]++
+	}
 	for _, player := range tp.team2 {
-		player.games++
-		if !team1Won {
-			player.wins++
+		player.games[0]++
+	}
+
+	// В зависимости от результата игры.
+	if team1Won {
+		if moreStrongTeam != nil && lessStrongTeam != nil {
+			if moreStrongTeam[0] == tp.team1[0] {
+				stats.moreStrongTeamGames[1]++
+			} else {
+				stats.lessStrongTeamGames[1]++
+			}
+		}
+		for _, player := range tp.team1 {
+			player.games[1]++
+		}
+	} else {
+		if moreStrongTeam != nil && lessStrongTeam != nil {
+			if moreStrongTeam[0] == tp.team2[0] {
+				stats.moreStrongTeamGames[1]++
+			} else {
+				stats.lessStrongTeamGames[1]++
+			}
+		}
+		for _, player := range tp.team2 {
+			player.games[1]++
 		}
 	}
 }
@@ -171,11 +267,11 @@ func findEqualTeamPair(tp TeamPair, i int) TeamPair {
 	if len(tp.team1) == len(dayPlayers)/2 || len(tp.team2) == len(dayPlayers)/2 {
 		if len(tp.team1) == len(dayPlayers)/2 {
 			tp.team2 = append(tp.team2, dayPlayers[i:]...)
-			tp.ratingSum2 += getPlayersRatingSum(dayPlayers[i:])
+			tp.successSum2 += getPlayersSuccessRateSum(dayPlayers[i:])
 			tp.strengthSum2 += getPlayersStrengthSum(dayPlayers[i:])
 		} else {
 			tp.team1 = append(tp.team1, dayPlayers[i:]...)
-			tp.ratingSum1 += getPlayersRatingSum(dayPlayers[i:])
+			tp.successSum1 += getPlayersSuccessRateSum(dayPlayers[i:])
 			tp.strengthSum1 += getPlayersStrengthSum(dayPlayers[i:])
 		}
 		return tp
@@ -186,10 +282,10 @@ func findEqualTeamPair(tp TeamPair, i int) TeamPair {
 		findEqualTeamPair(
 			TeamPair{
 				append(tp.team1, dayPlayers[i]),
-				tp.ratingSum1 + dayPlayers[i].getRating(),
+				tp.successSum1 + dayPlayers[i].getSuccessRate(),
 				tp.strengthSum1 + dayPlayers[i].strength,
 				append([]*Player{}, tp.team2...),
-				tp.ratingSum2,
+				tp.successSum2,
 				tp.strengthSum2,
 			},
 			i+1,
@@ -197,10 +293,10 @@ func findEqualTeamPair(tp TeamPair, i int) TeamPair {
 		findEqualTeamPair(
 			TeamPair{
 				append([]*Player{}, tp.team1...),
-				tp.ratingSum1,
+				tp.successSum1,
 				tp.strengthSum1,
 				append(tp.team2, dayPlayers[i]),
-				tp.ratingSum2 + dayPlayers[i].getRating(),
+				tp.successSum2 + dayPlayers[i].getSuccessRate(),
 				tp.strengthSum2 + dayPlayers[i].strength,
 			},
 			i+1,
@@ -215,10 +311,22 @@ func main() {
 	// Отобрать случайным образом из множества 12 игроков.
 	pickDayPlayers()
 
-	// Разделить игроков на 2 равные макисмально близкие по среднему рейтингу команды.
-	teamPair := findEqualTeamPair(TeamPair{[]*Player{}, 0, 0, []*Player{}, 0, 0}, 0)
-	fmt.Println(teamPair.String())
+	// Разделить игроков на 2 равные максимально близкие по среднему рейтингу команды.
+	teamPair := findEqualTeamPair(
+		TeamPair{
+			team1:        []*Player{},
+			successSum1:  0,
+			strengthSum1: 0,
+			team2:        []*Player{},
+			successSum2:  0,
+			strengthSum2: 0,
+		},
+		0,
+	)
+	fmt.Println(teamPair)
 
 	teamPair.play()
-	fmt.Println(teamPair.String())
+	fmt.Println(teamPair)
+
+	fmt.Println(stats)
 }

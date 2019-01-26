@@ -333,6 +333,111 @@ func (stats *Stats) updateDays(tp *TeamPair, results map[bool]int) {
 	}
 }
 
+// validate проверяет, что статистика согласована, иначе выводит ошибки.
+func (stats *Stats) validate() {
+	errs := make([]string, 0)
+
+	if stats.games != stats.days*GAMES_A_DAY {
+		errs = append(errs, "Количество игр не согласовано с количеством дней и количеством игр в день.")
+	}
+
+	// Проверяем статистику по играм.
+	if stats.moreStrongTeamGames[0]+stats.lessStrongTeamGames[0]+stats.equalStrongTeamGames[0] != stats.games*2 {
+		errs = append(errs, "Суммарное количество игр в категориях по силе не согласовано с общим количеством игр.")
+	}
+
+	if stats.moreSuccessfulTeamGames[0]+stats.lessSuccessfulTeamGames[0]+stats.equalSuccessfulTeamGames[0] != stats.games*2 {
+		errs = append(errs, "Суммарное количество игр в категориях по успешности не согласовано с общим количеством игр.")
+	}
+
+	if stats.moreStrongTeamGames[1]+stats.lessStrongTeamGames[1]+stats.equalStrongTeamGames[1] != stats.games {
+		errs = append(errs, "Суммарное количество выигранных игр в категориях по силе не согласовано с общим количеством игр.")
+	}
+
+	if stats.moreSuccessfulTeamGames[1]+stats.lessSuccessfulTeamGames[1]+stats.equalSuccessfulTeamGames[1] != stats.games {
+		errs = append(errs, "Суммарное количество выигранных игр в категориях по успешности не согласовано с общим количеством игр.")
+	}
+
+	// Проверяем статистику по дням.
+	if stats.moreStrongTeamDays[1]+stats.moreStrongTeamDays[2]+stats.moreStrongTeamDays[3] != stats.moreStrongTeamDays[0] {
+		errs = append(errs, "Суммарное количество дней по результатам в более сильных командах не согласовано с количеством дней")
+	}
+
+	if stats.lessStrongTeamDays[1]+stats.lessStrongTeamDays[2]+stats.lessStrongTeamDays[3] != stats.lessStrongTeamDays[0] {
+		errs = append(errs, "Суммарное количество дней по результатам в менее сильных командах не согласовано с количеством дней")
+	}
+
+	if stats.equalStrongTeamDays[1]+stats.equalStrongTeamDays[2]+stats.equalStrongTeamDays[3] != stats.equalStrongTeamDays[0] {
+		errs = append(errs, "Суммарное количество дней по результатам в равных по силе командах не согласовано с количеством дней")
+	}
+
+	if stats.moreSuccessfulTeamDays[1]+stats.moreSuccessfulTeamDays[2]+stats.moreSuccessfulTeamDays[3] != stats.moreSuccessfulTeamDays[0] {
+		errs = append(errs, "Суммарное количество дней по результатам в более успешных командах не согласовано с количеством дней")
+	}
+
+	if stats.lessSuccessfulTeamDays[1]+stats.lessSuccessfulTeamDays[2]+stats.lessSuccessfulTeamDays[3] != stats.lessSuccessfulTeamDays[0] {
+		errs = append(errs, "Суммарное количество дней по результатам в менее успешных командах не согласовано с количеством дней")
+	}
+
+	if stats.equalSuccessfulTeamDays[1]+stats.equalSuccessfulTeamDays[2]+stats.equalSuccessfulTeamDays[3] != stats.equalSuccessfulTeamDays[0] {
+		errs = append(errs, "Суммарное количество дней по результатам в равных по успешности командах не согласовано с количеством дней")
+	}
+
+	if stats.moreStrongTeamDays[0]+stats.lessStrongTeamDays[0]+stats.equalStrongTeamDays[0] != stats.days*2 {
+		errs = append(errs, "Суммарное количество дней в категориях по силе не согласовано с общим количеством дней.")
+	}
+
+	if stats.moreSuccessfulTeamDays[0]+stats.lessSuccessfulTeamDays[0]+stats.equalSuccessfulTeamDays[0] != stats.days*2 {
+		errs = append(errs, "Суммарное количество дней в категориях по успешности не согласовано с общим количеством дней.")
+	}
+
+	if stats.moreStrongTeamDays[1]+stats.lessStrongTeamDays[1]+stats.equalStrongTeamDays[1] != stats.days {
+		errs = append(errs, "Суммарное количество выигранных дней в категориях по силе не согласовано с общим количеством дней.")
+	}
+
+	if stats.moreSuccessfulTeamDays[1]+stats.lessSuccessfulTeamDays[1]+stats.equalSuccessfulTeamDays[1] != stats.days {
+		errs = append(errs, "Суммарное количество выигранных дней в категориях по успешности не согласовано с общим количеством дней.")
+	}
+
+	/* Валидация статистик игроков. */
+	var games, wins, days, winDays, defeatDays, drawDays int
+
+	for _, player := range allPlayers {
+		if player.games[0] != player.days[0]*GAMES_A_DAY {
+			errs = append(errs, fmt.Sprintf("Количество игр игрока %s не согласовано с его количеством дней.", player.name))
+		}
+		games += player.games[0]
+		wins += player.games[1]
+		days += player.days[0]
+		winDays += player.days[1]
+		defeatDays += player.days[2]
+		drawDays += player.days[3]
+	}
+
+	if games != stats.games*12 {
+		errs = append(errs, "Суммарное количество игр игроков не согласовано с общим количеством игр.")
+	}
+
+	if days != stats.days*12 {
+		errs = append(errs, "Суммарное количество игровых дней игроков не согласовано с общим количеством игровых дней.")
+	}
+
+	if wins*2 != games {
+		errs = append(errs, "Суммарное количество побед игроков не согласовано с общим количеством игр.")
+	}
+
+	if winDays+defeatDays+drawDays != days {
+		errs = append(errs, "Суммарное количество дней по итогам не согласовано с общим количеством дней.")
+	}
+
+	if len(errs) > 0 {
+		fmt.Println("Статистика не согласована! Ошибки:")
+		for _, err := range errs {
+			fmt.Println(err)
+		}
+	}
+}
+
 var (
 	// Все игроки
 	allPlayers = []*Player{
@@ -564,10 +669,12 @@ func main() {
 	// Инициировать генератор случайных чисел.
 	rand.Seed(42)
 
-	teamPair := pickTeamPair()
-
-	teamPair.playDay()
-	fmt.Println(teamPair)
+	// Сыграть 10 дней
+	for d := 0; d < 2; d++ {
+		teamPair := pickTeamPair()
+		teamPair.playDay()
+	}
 
 	fmt.Println(stats)
+	stats.validate()
 }

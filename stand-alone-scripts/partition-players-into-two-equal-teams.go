@@ -662,6 +662,30 @@ func pickTeamPair() *TeamPair {
 	return &teamPair
 }
 
+func getCorrelation(set1, set2 []float64) (float64, error) {
+	if len(set1) != len(set2) {
+		return 0, fmt.Errorf("Set sizes are not equal: %d != %d", len(set1), len(set2))
+	}
+
+	var sum1, sum2, mean1, mean2, cov, s1, s2 float64
+
+	for i := range set1 {
+		sum1 += set1[i]
+		sum2 += set2[i]
+	}
+
+	mean1 = sum1 / float64(len(set1))
+	mean2 = sum2 / float64(len(set2))
+
+	for i := range set1 {
+		cov += (set1[i] - mean1) * (set2[i] - mean2)
+		s1 += math.Pow((set1[i] - mean1), 2)
+		s2 += math.Pow((set2[i] - mean2), 2)
+	}
+
+	return cov / math.Sqrt(s1*s2), nil
+}
+
 func main() {
 	// Инициировать генератор случайных чисел.
 	rand.Seed(42)
@@ -675,5 +699,15 @@ func main() {
 	fmt.Println(stats)
 	stats.validate()
 
-	fmt.Println(allPlayers)
+	strengths := make([]float64, len(allPlayers))
+	successRates := make([]float64, len(allPlayers))
+	for i, player := range allPlayers {
+		strengths[i] = player.strength
+		successRates[i] = player.getSuccessRate()
+	}
+	correlation, err := getCorrelation(strengths, successRates)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Коэффициент корреляции между силой игрока и его успешностью %.3f.\n", correlation)
 }

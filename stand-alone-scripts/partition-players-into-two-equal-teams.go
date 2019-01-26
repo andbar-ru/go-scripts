@@ -391,14 +391,6 @@ func (stats *Stats) validate() {
 		errs = append(errs, "Суммарное количество дней в категориях по успешности не согласовано с общим количеством дней.")
 	}
 
-	if stats.moreStrongTeamDays[1]+stats.lessStrongTeamDays[1]+stats.equalStrongTeamDays[1] != stats.days {
-		errs = append(errs, "Суммарное количество выигранных дней в категориях по силе не согласовано с общим количеством дней.")
-	}
-
-	if stats.moreSuccessfulTeamDays[1]+stats.lessSuccessfulTeamDays[1]+stats.equalSuccessfulTeamDays[1] != stats.days {
-		errs = append(errs, "Суммарное количество выигранных дней в категориях по успешности не согласовано с общим количеством дней.")
-	}
-
 	/* Валидация статистик игроков. */
 	var games, wins, days, winDays, defeatDays, drawDays int
 
@@ -643,6 +635,11 @@ func pickTeamPair() *TeamPair {
 	)
 
 	// Выяснить более/менее сильные/успешные команды
+	moreStrongTeamPtr = nil
+	lessStrongTeamPtr = nil
+	moreSuccessfulTeamPtr = nil
+	lessSuccessfulTeamPtr = nil
+
 	if teamPair.strengthSum1 != teamPair.strengthSum2 {
 		if teamPair.strengthSum1 > teamPair.strengthSum2 {
 			moreStrongTeamPtr = &teamPair.team1
@@ -669,12 +666,14 @@ func main() {
 	// Инициировать генератор случайных чисел.
 	rand.Seed(42)
 
-	// Сыграть 10 дней
-	for d := 0; d < 2; d++ {
+	// Сыграть много дней
+	for d := 0; d < 1000; d++ {
 		teamPair := pickTeamPair()
 		teamPair.playDay()
 	}
 
 	fmt.Println(stats)
 	stats.validate()
+
+	fmt.Println(allPlayers)
 }

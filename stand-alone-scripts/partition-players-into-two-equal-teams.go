@@ -25,6 +25,7 @@ type Player struct {
 	gender   rune
 	strength float64
 	games    [2]int // всего и выигранных
+	days     [4]int // дневные итоги: всего, выигранных, проигранных и с равным результатом
 }
 
 func (p *Player) getSuccessRate() float64 {
@@ -35,7 +36,10 @@ func (p *Player) getSuccessRate() float64 {
 }
 
 func (p Player) String() string {
-	return fmt.Sprintf("%s: сила %.1f, кол-во игр %d, кол-во побед %d, успешность %.2f\n", p.name, p.strength, p.games[0], p.games[1], p.getSuccessRate())
+	return fmt.Sprintf("%s: сила %.1f; игры: %d из %d, успешность %.2f; дни %d: +%d-%d=%d (%.1f %%)\n",
+		p.name, p.strength, p.games[1], p.games[0], p.getSuccessRate(),
+		p.days[0], p.days[1], p.days[2], p.days[3],
+		getPercent(float64(p.days[1])+float64(p.days[3])/2, float64(p.days[0])))
 }
 
 type Stats struct {
@@ -103,6 +107,232 @@ func (s Stats) String() string {
 	return str
 }
 
+// updateGames обновляет статистику по играм.
+func (stats *Stats) updateGames(tp *TeamPair, team1Won bool) {
+	/* Независимую от результата игры. */
+	stats.games++
+	// По силе.
+	if moreStrongTeamPtr == nil && lessStrongTeamPtr == nil {
+		stats.equalStrongTeamGames[0] += 2 // количество игр на 2 команды
+		stats.equalStrongTeamGames[1] += 1 // победа только у одной
+	} else if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
+		stats.moreStrongTeamGames[0]++
+		stats.lessStrongTeamGames[0]++
+	} else {
+		panic("Unexpected situation")
+	}
+	// По успеху.
+	if moreSuccessfulTeamPtr == nil && lessSuccessfulTeamPtr == nil {
+		stats.equalSuccessfulTeamGames[0] += 2 // количество игр на 2 команды
+		stats.equalSuccessfulTeamGames[1] += 1 // победа только у одной
+	} else if moreSuccessfulTeamPtr != nil && lessSuccessfulTeamPtr != nil {
+		stats.moreSuccessfulTeamGames[0]++
+		stats.lessSuccessfulTeamGames[0]++
+	} else {
+		panic("Unexpected situation")
+	}
+	// Обновляем счётчик сыгранных игр обеих команд.
+	for _, player := range tp.team1 {
+		player.games[0]++
+	}
+	for _, player := range tp.team2 {
+		player.games[0]++
+	}
+
+	/* Зависимую от результата игры. */
+	if team1Won {
+		if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
+			if moreStrongTeamPtr == &tp.team1 {
+				stats.moreStrongTeamGames[1]++
+			} else if lessStrongTeamPtr == &tp.team1 {
+				stats.lessStrongTeamGames[1]++
+			} else {
+				panic("Unexpected situation")
+			}
+		}
+		if moreSuccessfulTeamPtr != nil && lessSuccessfulTeamPtr != nil {
+			if moreSuccessfulTeamPtr == &tp.team1 {
+				stats.moreSuccessfulTeamGames[1]++
+			} else if lessSuccessfulTeamPtr == &tp.team1 {
+				stats.lessSuccessfulTeamGames[1]++
+			} else {
+				panic("Unexpected situation")
+			}
+		}
+		for _, player := range tp.team1 {
+			player.games[1]++
+		}
+	} else {
+		if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
+			if moreStrongTeamPtr == &tp.team2 {
+				stats.moreStrongTeamGames[1]++
+			} else if lessStrongTeamPtr == &tp.team2 {
+				stats.lessStrongTeamGames[1]++
+			} else {
+				panic("Unexpected situation")
+			}
+		}
+		if moreSuccessfulTeamPtr != nil && lessSuccessfulTeamPtr != nil {
+			if moreSuccessfulTeamPtr == &tp.team2 {
+				stats.moreSuccessfulTeamGames[1]++
+			} else if lessSuccessfulTeamPtr == &tp.team2 {
+				stats.lessSuccessfulTeamGames[1]++
+			} else {
+				panic("Unexpected situation")
+			}
+		}
+		for _, player := range tp.team2 {
+			player.games[1]++
+		}
+	}
+}
+
+// updateDays обновляет статистику по дням.
+func (stats *Stats) updateDays(tp *TeamPair, results map[bool]int) {
+	/* Независимую от результатов. */
+	stats.days++
+	// По силе
+	if moreStrongTeamPtr == nil && lessStrongTeamPtr == nil {
+		stats.equalStrongTeamDays[0] += 2 // количество дней на 2 команды
+	} else {
+		stats.moreStrongTeamDays[0]++
+		stats.lessStrongTeamDays[0]++
+	}
+	// По успеху.
+	if moreSuccessfulTeamPtr == nil && lessSuccessfulTeamPtr == nil {
+		stats.equalSuccessfulTeamDays[0] += 2 // количество дней на 2 команды
+	} else {
+		stats.moreSuccessfulTeamDays[0]++
+		stats.lessSuccessfulTeamDays[0]++
+	}
+	// Обновляем счётчик сыгранных дней обеих команд.
+	for _, player := range tp.team1 {
+		player.days[0]++
+	}
+	for _, player := range tp.team2 {
+		player.days[0]++
+	}
+
+	/* Зависимую от результатов. */
+	if results[true] == results[false] {
+		// по силе
+		if moreStrongTeamPtr == nil && lessStrongTeamPtr == nil {
+			stats.equalStrongTeamDays[3] += 2 // для каждой команды
+		} else if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
+			stats.moreStrongTeamDays[3]++
+			stats.lessStrongTeamDays[3]++
+		} else {
+			panic("Unexpected situation")
+		}
+		// по успешности
+		if moreSuccessfulTeamPtr == nil && lessSuccessfulTeamPtr == nil {
+			stats.equalSuccessfulTeamDays[3] += 2 // для каждой команды
+		} else if moreSuccessfulTeamPtr != nil && lessSuccessfulTeamPtr != nil {
+			stats.moreSuccessfulTeamDays[3]++
+			stats.lessSuccessfulTeamDays[3]++
+		} else {
+			panic("Unexpected situation")
+		}
+		// счётчик сыгранных дней обеих команд
+		for _, player := range tp.team1 {
+			player.days[3]++
+		}
+		for _, player := range tp.team2 {
+			player.days[3]++
+		}
+	} else if results[true] > results[false] {
+		// по силе
+		if moreStrongTeamPtr == nil && lessStrongTeamPtr == nil {
+			// Для одной команды удачный день, для второй -- неудачный.
+			stats.equalStrongTeamDays[1]++
+			stats.equalStrongTeamDays[2]++
+		} else if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
+			if moreStrongTeamPtr == &tp.team1 {
+				stats.moreStrongTeamDays[1]++
+				stats.lessStrongTeamDays[2]++
+			} else if lessStrongTeamPtr == &tp.team1 {
+				stats.lessStrongTeamDays[1]++
+				stats.moreStrongTeamDays[2]++
+			} else {
+				panic("Unexpected situation")
+			}
+		} else {
+			panic("Unexpected situation")
+		}
+		// по успешности
+		if moreSuccessfulTeamPtr == nil && lessSuccessfulTeamPtr == nil {
+			// Для одной команды удачный день, для второй -- неудачный.
+			stats.equalSuccessfulTeamDays[1]++
+			stats.equalSuccessfulTeamDays[2]++
+		} else if moreSuccessfulTeamPtr != nil && lessSuccessfulTeamPtr != nil {
+			if moreSuccessfulTeamPtr == &tp.team1 {
+				stats.moreSuccessfulTeamDays[1]++
+				stats.lessSuccessfulTeamDays[2]++
+			} else if lessSuccessfulTeamPtr == &tp.team1 {
+				stats.lessSuccessfulTeamDays[1]++
+				stats.moreSuccessfulTeamDays[2]++
+			} else {
+				panic("Unexpected situation")
+			}
+		} else {
+			panic("Unexpected situation")
+		}
+		// счётчик сыгранных дней обеих команд
+		for _, player := range tp.team1 {
+			player.days[1]++
+		}
+		for _, player := range tp.team2 {
+			player.days[2]++
+		}
+	} else if results[true] < results[false] {
+		// по силе
+		if moreStrongTeamPtr == nil && lessStrongTeamPtr == nil {
+			// Для одной команды удачный день, для второй -- неудачный.
+			stats.equalStrongTeamDays[1]++
+			stats.equalStrongTeamDays[2]++
+		} else if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
+			if moreStrongTeamPtr == &tp.team1 {
+				stats.moreStrongTeamDays[2]++
+				stats.lessStrongTeamDays[1]++
+			} else if lessStrongTeamPtr == &tp.team1 {
+				stats.lessStrongTeamDays[2]++
+				stats.moreStrongTeamDays[1]++
+			} else {
+				panic("Unexpected situation")
+			}
+		} else {
+			panic("Unexpected situation")
+		}
+		// по успешности
+		if moreSuccessfulTeamPtr == nil && lessSuccessfulTeamPtr == nil {
+			// Для одной команды удачный день, для второй -- неудачный.
+			stats.equalSuccessfulTeamDays[1]++
+			stats.equalSuccessfulTeamDays[2]++
+		} else if moreSuccessfulTeamPtr != nil && lessSuccessfulTeamPtr != nil {
+			if moreSuccessfulTeamPtr == &tp.team1 {
+				stats.moreSuccessfulTeamDays[2]++
+				stats.lessSuccessfulTeamDays[1]++
+			} else if lessSuccessfulTeamPtr == &tp.team1 {
+				stats.lessSuccessfulTeamDays[2]++
+				stats.moreSuccessfulTeamDays[1]++
+			} else {
+				panic("Unexpected situation")
+			}
+		} else {
+			panic("Unexpected situation")
+		}
+		// счётчик сыгранных дней обеих команд
+		for _, player := range tp.team1 {
+			player.days[2]++
+		}
+		for _, player := range tp.team2 {
+			player.days[1]++
+		}
+	} else {
+		panic("Unexpected situation")
+	}
+}
+
 var (
 	// Все игроки
 	allPlayers = []*Player{
@@ -154,8 +384,12 @@ var (
 		&Player{name: "Юлия", gender: 'F', strength: 0.6},
 		&Player{name: "Яна", gender: 'F', strength: 0.7},
 	}
-	dayPlayers [12]*Player // игроки в текущий день
-	stats      = Stats{}
+	stats = &Stats{}
+	// Выясняется после сбора команды
+	moreStrongTeamPtr     *[]*Player
+	lessStrongTeamPtr     *[]*Player
+	moreSuccessfulTeamPtr *[]*Player
+	lessSuccessfulTeamPtr *[]*Player
 )
 
 // getPlayersSuccessRateSum возвращает сумму рейтингов списка игроков.
@@ -205,82 +439,11 @@ func (tp *TeamPair) ratingSumDiff() float64 {
 
 // play играет игру, записывает результаты и возвращает, победила ли первая команда.
 func (tp *TeamPair) play() bool {
-	// Более и менее сильные и более и менее успешные команды.
-	var moreStrongTeamPtr, lessStrongTeamPtr, moreSuccessfulTeamPtr, lessSuccessfulTeamPtr *[]*Player
-	if tp.strengthSum1 != tp.strengthSum2 {
-		if tp.strengthSum1 > tp.strengthSum2 {
-			moreStrongTeamPtr = &tp.team1
-			lessStrongTeamPtr = &tp.team2
-		} else {
-			moreStrongTeamPtr = &tp.team2
-			lessStrongTeamPtr = &tp.team1
-		}
-	}
-	if tp.successSum1 != tp.successSum2 {
-		if tp.successSum1 > tp.successSum2 {
-			moreSuccessfulTeamPtr = &tp.team1
-			lessSuccessfulTeamPtr = &tp.team2
-		} else {
-			moreSuccessfulTeamPtr = &tp.team2
-			lessSuccessfulTeamPtr = &tp.team1
-		}
-	}
-
 	// Шансы первой команды победить в отдельно взятой игре.
 	threshold := tp.strengthSum1 / (tp.strengthSum1 + tp.strengthSum2)
 	team1Won := rand.Float64() < threshold
 
-	/* Обновляем статистику. */
-	// Независимую от результата игры.
-	stats.games++
-	// По силе.
-	if moreStrongTeamPtr == nil && lessStrongTeamPtr == nil {
-		stats.equalStrongTeamGames[0] += 2 // игры у каждой команды
-		stats.equalStrongTeamGames[1] += 1 // победа только у одной
-	} else {
-		stats.moreStrongTeamGames[0]++
-		stats.lessStrongTeamGames[0]++
-	}
-	// По успеху.
-	if moreSuccessfulTeamPtr == nil && lessSuccessfulTeamPtr == nil {
-		stats.equalSuccessfulTeamGames[0] += 2 // игры у каждой команды
-		stats.equalSuccessfulTeamGames[1] += 1 // победа только у одной
-	} else {
-		stats.moreSuccessfulTeamGames[0]++
-		stats.lessSuccessfulTeamGames[0]++
-	}
-	// Обновляем счётчик сыгранных игр обеих команд.
-	for _, player := range tp.team1 {
-		player.games[0]++
-	}
-	for _, player := range tp.team2 {
-		player.games[0]++
-	}
-
-	// В зависимости от результата игры.
-	if team1Won {
-		if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
-			if moreStrongTeamPtr == &tp.team1 {
-				stats.moreStrongTeamGames[1]++
-			} else {
-				stats.lessStrongTeamGames[1]++
-			}
-		}
-		for _, player := range tp.team1 {
-			player.games[1]++
-		}
-	} else {
-		if moreStrongTeamPtr != nil && lessStrongTeamPtr != nil {
-			if moreStrongTeamPtr == &tp.team2 {
-				stats.moreStrongTeamGames[1]++
-			} else {
-				stats.lessStrongTeamGames[1]++
-			}
-		}
-		for _, player := range tp.team2 {
-			player.games[1]++
-		}
-	}
+	stats.updateGames(tp, team1Won)
 
 	return team1Won
 }
@@ -293,17 +456,8 @@ func (tp *TeamPair) playDay() {
 		team1Won := tp.play()
 		results[team1Won]++
 	}
-	fmt.Println(results)
 
-	stats.days++
-}
-
-// pickDayPlayers отбирает 12 игроков из allPlayers и помещает их в массив dayPlayers.
-func pickDayPlayers() {
-	indexes := rand.Perm(len(allPlayers))[:12]
-	for i, index := range indexes {
-		dayPlayers[i] = allPlayers[index]
-	}
+	stats.updateDays(tp, results)
 }
 
 // getMoreEqualTeamPair возвращает ту пару команд, где разница между суммарными рейтингами команд меньше.
@@ -315,29 +469,30 @@ func getMoreEqualTeamPair(tp1, tp2 TeamPair) TeamPair {
 	}
 }
 
-// partitionDayPlayers делит игроков dayPlayers на 2 максимально близкие по среднему рейтингу команды.
-func findEqualTeamPair(tp TeamPair, i int) TeamPair {
-	// Если размер какой-нибудь команды достиг половины dayPlayers, оставшихся людей сунуть в другую группу и вернуть результат.
-	if len(tp.team1) == len(dayPlayers)/2 || len(tp.team2) == len(dayPlayers)/2 {
-		if len(tp.team1) == len(dayPlayers)/2 {
-			tp.team2 = append(tp.team2, dayPlayers[i:]...)
-			tp.successSum2 += getPlayersSuccessRateSum(dayPlayers[i:])
-			tp.strengthSum2 += getPlayersStrengthSum(dayPlayers[i:])
+// findEqualTeamPair делит игроков на 2 максимально близкие по суммарной успешности команды.
+func findEqualTeamPair(players *[12]*Player, tp TeamPair, i int) TeamPair {
+	// Если размер какой-нибудь команды достиг половины players, оставшихся людей сунуть в другую группу и вернуть результат.
+	if len(tp.team1) == len(players)/2 || len(tp.team2) == len(players)/2 {
+		if len(tp.team1) == len(players)/2 {
+			tp.team2 = append(tp.team2, players[i:]...)
+			tp.successSum2 += getPlayersSuccessRateSum(players[i:])
+			tp.strengthSum2 += getPlayersStrengthSum(players[i:])
 		} else {
-			tp.team1 = append(tp.team1, dayPlayers[i:]...)
-			tp.successSum1 += getPlayersSuccessRateSum(dayPlayers[i:])
-			tp.strengthSum1 += getPlayersStrengthSum(dayPlayers[i:])
+			tp.team1 = append(tp.team1, players[i:]...)
+			tp.successSum1 += getPlayersSuccessRateSum(players[i:])
+			tp.strengthSum1 += getPlayersStrengthSum(players[i:])
 		}
 		return tp
 	}
 
-	// Каждого из dayPlayers мы можем сунуть либо в одну либо в другую команду. Надо найти лучший вариант из двух.
+	// Каждого игрока мы можем сунуть либо в одну либо в другую команду. Надо найти лучший вариант из двух.
 	return getMoreEqualTeamPair(
 		findEqualTeamPair(
+			players,
 			TeamPair{
-				append(tp.team1, dayPlayers[i]),
-				tp.successSum1 + dayPlayers[i].getSuccessRate(),
-				tp.strengthSum1 + dayPlayers[i].strength,
+				append(tp.team1, players[i]),
+				tp.successSum1 + players[i].getSuccessRate(),
+				tp.strengthSum1 + players[i].strength,
 				append([]*Player{}, tp.team2...),
 				tp.successSum2,
 				tp.strengthSum2,
@@ -345,28 +500,32 @@ func findEqualTeamPair(tp TeamPair, i int) TeamPair {
 			i+1,
 		),
 		findEqualTeamPair(
+			players,
 			TeamPair{
 				append([]*Player{}, tp.team1...),
 				tp.successSum1,
 				tp.strengthSum1,
-				append(tp.team2, dayPlayers[i]),
-				tp.successSum2 + dayPlayers[i].getSuccessRate(),
-				tp.strengthSum2 + dayPlayers[i].strength,
+				append(tp.team2, players[i]),
+				tp.successSum2 + players[i].getSuccessRate(),
+				tp.strengthSum2 + players[i].strength,
 			},
 			i+1,
 		),
 	)
 }
 
-func main() {
-	// Инициировать генератор случайных чисел.
-	rand.Seed(42)
+// pickTeamPair отбирает игроков, составляет из них 2 команды и возвращает указатель на неё.
+func pickTeamPair() *TeamPair {
+	// Отобрать 12 игроков
+	var players [12]*Player
+	indexes := rand.Perm(len(allPlayers))[:12]
+	for i, index := range indexes {
+		players[i] = allPlayers[index]
+	}
 
-	// Отобрать случайным образом из множества 12 игроков.
-	pickDayPlayers()
-
-	// Разделить игроков на 2 равные максимально близкие по среднему рейтингу команды.
+	// Разделить игроков на 2 равные максимально близкие по суммарной успешности команды.
 	teamPair := findEqualTeamPair(
+		&players,
 		TeamPair{
 			team1:        []*Player{},
 			successSum1:  0,
@@ -377,6 +536,35 @@ func main() {
 		},
 		0,
 	)
+
+	// Выяснить более/менее сильные/успешные команды
+	if teamPair.strengthSum1 != teamPair.strengthSum2 {
+		if teamPair.strengthSum1 > teamPair.strengthSum2 {
+			moreStrongTeamPtr = &teamPair.team1
+			lessStrongTeamPtr = &teamPair.team2
+		} else {
+			moreStrongTeamPtr = &teamPair.team2
+			lessStrongTeamPtr = &teamPair.team1
+		}
+	}
+	if teamPair.successSum1 != teamPair.successSum2 {
+		if teamPair.successSum1 > teamPair.successSum2 {
+			moreSuccessfulTeamPtr = &teamPair.team1
+			lessSuccessfulTeamPtr = &teamPair.team2
+		} else {
+			moreSuccessfulTeamPtr = &teamPair.team2
+			lessSuccessfulTeamPtr = &teamPair.team1
+		}
+	}
+
+	return &teamPair
+}
+
+func main() {
+	// Инициировать генератор случайных чисел.
+	rand.Seed(42)
+
+	teamPair := pickTeamPair()
 
 	teamPair.playDay()
 	fmt.Println(teamPair)

@@ -566,8 +566,9 @@ func getMoreEqualTeamPair(tp1, tp2 TeamPair) TeamPair {
 	}
 }
 
-// findEqualTeamPair делит игроков на 2 максимально близкие по суммарной успешности команды.
-func findEqualTeamPair(players *[12]*Player, tp TeamPair, i int) TeamPair {
+// findEqualTeamPairRecursive перебирает все способы набора игроков в 2 команды и возвращает такой,
+// в котором разница между суммарными успешностями игроков мимнимальна.
+func findEqualTeamPairRecursive(players *[12]*Player, tp TeamPair, i int) TeamPair {
 	// Если размер какой-нибудь команды достиг половины players, оставшихся людей сунуть в другую группу и вернуть результат.
 	if len(tp.team1) == len(players)/2 || len(tp.team2) == len(players)/2 {
 		if len(tp.team1) == len(players)/2 {
@@ -584,7 +585,7 @@ func findEqualTeamPair(players *[12]*Player, tp TeamPair, i int) TeamPair {
 
 	// Каждого игрока мы можем сунуть либо в одну либо в другую команду. Надо найти лучший вариант из двух.
 	return getMoreEqualTeamPair(
-		findEqualTeamPair(
+		findEqualTeamPairRecursive(
 			players,
 			TeamPair{
 				append(tp.team1, players[i]),
@@ -596,7 +597,7 @@ func findEqualTeamPair(players *[12]*Player, tp TeamPair, i int) TeamPair {
 			},
 			i+1,
 		),
-		findEqualTeamPair(
+		findEqualTeamPairRecursive(
 			players,
 			TeamPair{
 				append([]*Player{}, tp.team1...),
@@ -611,18 +612,11 @@ func findEqualTeamPair(players *[12]*Player, tp TeamPair, i int) TeamPair {
 	)
 }
 
-// pickTeamPair отбирает игроков, составляет из них 2 команды и возвращает указатель на неё.
-func pickTeamPair() *TeamPair {
-	// Отобрать 12 игроков
-	var players [12]*Player
-	indexes := rand.Perm(len(allPlayers))[:12]
-	for i, index := range indexes {
-		players[i] = allPlayers[index]
-	}
-
-	// Разделить игроков на 2 равные максимально близкие по суммарной успешности команды.
-	teamPair := findEqualTeamPair(
-		&players,
+// findEqualTeamPair делит игроков на 2 максимально близкие по суммарной успешности команды.
+// Обёртка над findEqualTeamPairRecursive.
+func findEqualTeamPair(players *[12]*Player) TeamPair {
+	return findEqualTeamPairRecursive(
+		players,
 		TeamPair{
 			team1:        []*Player{},
 			successSum1:  0,
@@ -633,6 +627,43 @@ func pickTeamPair() *TeamPair {
 		},
 		0,
 	)
+}
+
+// gatherTeamPairSimple делит игроков на 2 команды самым простым способом.
+// Так как игроки набираются случайным образом, команды тоже, по сути, получаются случайными.
+func gatherTeamPairSimple(players *[12]*Player) TeamPair {
+	team1 := players[:6]
+	team2 := players[6:]
+	var successSum1, successSum2, strengthSum1, strengthSum2 float64
+	for _, player := range team1 {
+		successSum1 += player.getSuccessRate()
+		strengthSum1 += player.strength
+	}
+	for _, player := range team2 {
+		successSum2 += player.getSuccessRate()
+		strengthSum2 += player.strength
+	}
+	return TeamPair{
+		team1:        team1,
+		successSum1:  successSum1,
+		strengthSum1: strengthSum1,
+		team2:        team2,
+		successSum2:  successSum2,
+		strengthSum2: strengthSum2,
+	}
+}
+
+// pickTeamPair отбирает игроков, составляет из них 2 команды и возвращает указатель на неё.
+func pickTeamPair(pickTeamPairFunc func(*[12]*Player) TeamPair) *TeamPair {
+	// Отобрать 12 игроков
+	var players [12]*Player
+	indexes := rand.Perm(len(allPlayers))[:12]
+	for i, index := range indexes {
+		players[i] = allPlayers[index]
+	}
+
+	// Разделить игроков на 2 команды.
+	teamPair := pickTeamPairFunc(&players)
 
 	// Выяснить более/менее сильные/успешные команды
 	moreStrongTeamPtr = nil
@@ -692,12 +723,15 @@ func main() {
 
 	// Сыграть много дней
 	for d := 0; d < 1000; d++ {
-		teamPair := pickTeamPair()
+		teamPair := pickTeamPair(findEqualTeamPair)
+		// teamPair := pickTeamPair(gatherTeamPairSimple)
 		teamPair.playDay()
 	}
 
 	fmt.Println(stats)
 	stats.validate()
+
+	fmt.Println(allPlayers)
 
 	strengths := make([]float64, len(allPlayers))
 	successRates := make([]float64, len(allPlayers))

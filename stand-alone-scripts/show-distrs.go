@@ -42,7 +42,8 @@ func main() {
 	defer rows.Close()
 
 	// Collect distrs
-	var nameFieldSize, countFieldSize, lastLastUpdate int
+	var nameFieldSize, countFieldSize, newestLastUpdate, oldestLastUpdate int
+	oldestLastUpdate = 1e8 // certainly greater than any date
 	distrs := []distr{}
 	for rows.Next() {
 		var d distr
@@ -56,9 +57,12 @@ func main() {
 		if len(d.name) > nameFieldSize {
 			nameFieldSize = len(d.name)
 		}
-		// Update last last_update
-		if d.last_update > lastLastUpdate {
-			lastLastUpdate = d.last_update
+		// Update newest and oldest last_updates
+		if d.last_update > newestLastUpdate {
+			newestLastUpdate = d.last_update
+		}
+		if d.last_update < oldestLastUpdate {
+			oldestLastUpdate = d.last_update
 		}
 	}
 	countFieldSize = len(fmt.Sprint(distrs[0].count)) // number of digits
@@ -87,11 +91,14 @@ func main() {
 		if i <= lastLeaderIndex {
 			boldness = 1
 		}
-		if distr.last_update == lastLastUpdate {
-			color = 31
-		}
 		fmt.Printf("\x1b[%d;%dm", boldness, color)
 		fmt.Printf("%*d. %-*s %*d %d", numberFieldSize, i+1, nameFieldSize, distr.name, countFieldSize, distr.count, distr.last_update)
+		if distr.last_update == newestLastUpdate {
+			fmt.Print(" newest")
+		}
+		if distr.last_update == oldestLastUpdate {
+			fmt.Print(" oldest")
+		}
 		fmt.Print("\x1b[0m")
 		fmt.Println()
 	}

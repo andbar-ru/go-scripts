@@ -1,3 +1,19 @@
+/*
+Objectives:
+* Parse pgn files given in command line arguments.
+* Determine which moves are pawn moves.
+* Determine which moves capture a pawn.
+* Statistics:
+  - estimate average fraction of pawn moves of all moves;
+  - estimate correlation between fraction of pawn moves and number of moves in a game;
+  - average chances to survive for all pawns and for each pawn individually;
+  - average chance to promote for all pawns and for each pawn individually;
+  - chances to survive if pawn moves first;
+  - chances to survive if pawn moves last or doesn't move;
+  - balance of kills and deaths for all pawns and for each pawn individually;
+  - average number of moves for each pawn;
+  - how many moves for one death for each pawn;
+*/
 package main
 
 import (
@@ -16,8 +32,34 @@ var (
 	tagsRegex          = regexp.MustCompile(`\[.*?\]`)
 	moveRegex          = regexp.MustCompile(`(\d+\.+)?(.*)`)
 	moveNumRegex       = regexp.MustCompile(`\d+\.`)
-	DotWithSpacesRegex = regexp.MustCompile(`\.\s+`)
+	dotWithSpacesRegex = regexp.MustCompile(`\.\s+`)
+	isPawnPlyRegex     = regexp.MustCompile(`^[a-h]`)
+
+	stats = &Stats{}
 )
+
+func getPercent(fraction, total float64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return (fraction * 100) / total
+}
+
+type Stats struct {
+	games     int
+	allPlies  int
+	pawnPlies int
+}
+
+func (s *Stats) String() string {
+	var output string
+
+	output += fmt.Sprintf("Games: %d\n", s.games)
+	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
+	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
+
+	return output
+}
 
 type Game struct {
 	moves []Move
@@ -90,7 +132,7 @@ func moveList(moveText string) ([]Move, error) {
 	// remove line breaks
 	text = strings.Replace(text, "\n", " ", -1)
 	// remove spaces after dot
-	text = DotWithSpacesRegex.ReplaceAllString(text, ".")
+	text = dotWithSpacesRegex.ReplaceAllString(text, ".")
 
 	list := strings.Split(text, " ")
 	moves := []Move{}
@@ -148,6 +190,26 @@ func validateMoves(moves []Move, moveText string) error {
 	return nil
 }
 
+func isPawnPly(ply string) bool {
+	return isPawnPlyRegex.MatchString(ply)
+}
+
+func analyseGame(game *Game) {
+	stats.games++
+
+	for _, move := range game.moves {
+		for _, ply := range move {
+			if ply != "" { // That might be in the last move of a game
+				stats.allPlies++
+
+				if isPawnPly(ply) {
+					stats.pawnPlies++
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	filepath := os.Args[1]
 	f, err := os.Open(filepath)
@@ -157,16 +219,15 @@ func main() {
 	defer f.Close()
 
 	parser := newPgnParser(f)
-	var count int
 	for parser.hasNextGame() {
 		game, err := parser.nextGame()
 		if err != nil {
 			panic(err)
 		}
 		if game != nil {
-			fmt.Println(game)
-			fmt.Println()
-			count++
+			analyseGame(game)
 		}
 	}
+
+	fmt.Println(stats)
 }

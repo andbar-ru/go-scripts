@@ -1,11 +1,11 @@
 /*
 Objectives:
-* Parse pgn files given in command line arguments.
-* Determine which moves are pawn moves.
+* Parse pgn files given in command line arguments. +
+* Determine which moves are pawn moves. +
 * Determine which moves capture a pawn.
 * Statistics:
-  - estimate average fraction of pawn moves of all moves;
-  - estimate correlation between fraction of pawn moves and number of moves in a game;
+  - estimate average fraction of pawn moves of all moves; +
+  - estimate correlation between fraction of pawn moves and number of moves in a game; +
   - average chances to survive for all pawns and for each pawn individually;
   - average chance to promote for all pawns and for each pawn individually;
   - chances to survive if pawn moves first;
@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -45,10 +46,36 @@ func getPercent(fraction, total float64) float64 {
 	return (fraction * 100) / total
 }
 
+func getCorrelation(set1, set2 []float64) (float64, error) {
+	if len(set1) != len(set2) {
+		return 0, fmt.Errorf("Set sizes are not equal: %d != %d", len(set1), len(set2))
+	}
+
+	var sum1, sum2, mean1, mean2, cov, s1, s2 float64
+
+	for i := range set1 {
+		sum1 += set1[i]
+		sum2 += set2[i]
+	}
+
+	mean1 = sum1 / float64(len(set1))
+	mean2 = sum2 / float64(len(set2))
+
+	for i := range set1 {
+		cov += (set1[i] - mean1) * (set2[i] - mean2)
+		s1 += math.Pow((set1[i] - mean1), 2)
+		s2 += math.Pow((set2[i] - mean2), 2)
+	}
+
+	return cov / math.Sqrt(s1*s2), nil
+}
+
 type Stats struct {
-	games     int
-	allPlies  int
-	pawnPlies int
+	games             int
+	allPlies          int
+	pawnPlies         int
+	gamePliesList     []int
+	gamePawnPliesList []int
 }
 
 func (s *Stats) String() string {
@@ -57,8 +84,25 @@ func (s *Stats) String() string {
 	output += fmt.Sprintf("Games: %d\n", s.games)
 	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
 	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
+	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.4f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
 
 	return output
+}
+
+func (s *Stats) getCorrelationBetweenPawnFractionAndGamePlies() float64 {
+	plies := make([]float64, len(s.gamePliesList))
+	for i, v := range s.gamePliesList {
+		plies[i] = float64(v)
+	}
+	fractions := make([]float64, len(s.gamePawnPliesList))
+	for i, v := range s.gamePawnPliesList {
+		fractions[i] = float64(v) / plies[i]
+	}
+	correlation, err := getCorrelation(plies, fractions)
+	if err != nil {
+		panic(err)
+	}
+	return correlation
 }
 
 type Game struct {
@@ -196,18 +240,23 @@ func isPawnPly(ply string) bool {
 
 func analyseGame(game *Game) {
 	stats.games++
+	var gamePlies, gamePawnPlies int
 
 	for _, move := range game.moves {
 		for _, ply := range move {
 			if ply != "" { // That might be in the last move of a game
 				stats.allPlies++
+				gamePlies++
 
 				if isPawnPly(ply) {
 					stats.pawnPlies++
+					gamePawnPlies++
 				}
 			}
 		}
 	}
+	stats.gamePliesList = append(stats.gamePliesList, gamePlies)
+	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
 }
 
 func main() {

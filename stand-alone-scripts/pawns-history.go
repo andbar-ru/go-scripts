@@ -27,6 +27,14 @@ import (
 	"strings"
 )
 
+const (
+	noPromotion = iota
+	knight
+	bishop
+	rook
+	queen
+)
+
 var (
 	commentsRegex      = regexp.MustCompile(`{.*?}`)
 	variationsRegex    = regexp.MustCompile(`\(.*?\)`)
@@ -38,6 +46,41 @@ var (
 
 	stats = &Stats{}
 )
+
+type Stats struct {
+	games             int
+	allPlies          int
+	pawnPlies         int
+	gamePliesList     []int
+	gamePawnPliesList []int
+}
+
+type PgnParser struct {
+	reader          *bufio.Reader
+	prevLineIsEmpty bool
+	err             error
+}
+
+type Square struct {
+	file uint8
+	rank uint8
+}
+
+type Pawn struct {
+	initSquare Square
+	square     Square
+	promotion  uint8
+	moves      int
+	captured   bool
+	captures   int
+}
+
+type Move [2]string
+
+type Game struct {
+	moves []Move
+	pawns map[Square]Pawn
+}
 
 func getPercent(fraction, total float64) float64 {
 	if total == 0 {
@@ -70,99 +113,8 @@ func getCorrelation(set1, set2 []float64) (float64, error) {
 	return cov / math.Sqrt(s1*s2), nil
 }
 
-type Stats struct {
-	games             int
-	allPlies          int
-	pawnPlies         int
-	gamePliesList     []int
-	gamePawnPliesList []int
-}
-
-func (s *Stats) String() string {
-	var output string
-
-	output += fmt.Sprintf("Games: %d\n", s.games)
-	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
-	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
-	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.4f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
-
-	return output
-}
-
-func (s *Stats) getCorrelationBetweenPawnFractionAndGamePlies() float64 {
-	plies := make([]float64, len(s.gamePliesList))
-	for i, v := range s.gamePliesList {
-		plies[i] = float64(v)
-	}
-	fractions := make([]float64, len(s.gamePawnPliesList))
-	for i, v := range s.gamePawnPliesList {
-		fractions[i] = float64(v) / plies[i]
-	}
-	correlation, err := getCorrelation(plies, fractions)
-	if err != nil {
-		panic(err)
-	}
-	return correlation
-}
-
-type Game struct {
-	moves []Move
-}
-
-type Move [2]string
-
-type PgnParser struct {
-	reader          *bufio.Reader
-	prevLineIsEmpty bool
-	err             error
-}
-
 func newPgnParser(source io.Reader) (parser *PgnParser) {
 	parser = &PgnParser{reader: bufio.NewReader(source)}
-	return
-}
-
-func (parser *PgnParser) hasNextGame() bool {
-	return parser.err == nil
-}
-
-func (parser *PgnParser) nextGame() (game *Game, err error) {
-	var moveText string
-	var paragraphCount int
-
-	for paragraphCount < 2 && parser.err == nil {
-		line, err := parser.reader.ReadString('\n')
-		if err != nil {
-			parser.err = err
-			if err != io.EOF {
-				return nil, err
-			}
-		}
-
-		if strings.TrimSpace(line) == "" {
-			if !parser.prevLineIsEmpty {
-				paragraphCount++
-			}
-			parser.prevLineIsEmpty = true
-		} else {
-			parser.prevLineIsEmpty = false
-			if paragraphCount == 1 {
-				moveText += line
-			}
-		}
-	}
-
-	if moveText != "" {
-		moves, err := moveList(moveText)
-		if err != nil {
-			parser.err = err
-		} else {
-			game = &Game{moves: moves}
-		}
-	}
-	if err == io.EOF {
-		err = nil
-	}
 	return
 }
 
@@ -259,6 +211,102 @@ func analyseGame(game *Game) {
 	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
 }
 
+func (s *Stats) String() string {
+	var output string
+
+	output += fmt.Sprintf("Games: %d\n", s.games)
+	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
+	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
+	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.4f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
+
+	return output
+}
+
+func (s *Stats) getCorrelationBetweenPawnFractionAndGamePlies() float64 {
+	plies := make([]float64, len(s.gamePliesList))
+	for i, v := range s.gamePliesList {
+		plies[i] = float64(v)
+	}
+	fractions := make([]float64, len(s.gamePawnPliesList))
+	for i, v := range s.gamePawnPliesList {
+		fractions[i] = float64(v) / plies[i]
+	}
+	correlation, err := getCorrelation(plies, fractions)
+	if err != nil {
+		panic(err)
+	}
+	return correlation
+}
+
+func (parser *PgnParser) hasNextGame() bool {
+	return parser.err == nil
+}
+
+func (parser *PgnParser) nextGame() (game *Game, err error) {
+	var moveText string
+	var paragraphCount int
+
+	for paragraphCount < 2 && parser.err == nil {
+		line, err := parser.reader.ReadString('\n')
+		if err != nil {
+			parser.err = err
+			if err != io.EOF {
+				return nil, err
+			}
+		}
+
+		if strings.TrimSpace(line) == "" {
+			if !parser.prevLineIsEmpty {
+				paragraphCount++
+			}
+			parser.prevLineIsEmpty = true
+		} else {
+			parser.prevLineIsEmpty = false
+			if paragraphCount == 1 {
+				moveText += line
+			}
+		}
+	}
+
+	if moveText != "" {
+		moves, err := moveList(moveText)
+		if err != nil {
+			parser.err = err
+		} else {
+			game = &Game{moves: moves}
+		}
+	}
+	if err == io.EOF {
+		err = nil
+	}
+	return
+}
+
+// setUp creates and sets up the pawns.
+func (g *Game) setUp() {
+	g.pawns = make(map[Square]Pawn)
+	// Set up pawns
+	for _, rank := range []uint8{2, 7} {
+		for file := uint8(1); file <= 8; file++ {
+			square := Square{file: file, rank: rank}
+			pawn := Pawn{
+				initSquare: square,
+				square:     square,
+				promotion:  noPromotion,
+				moves:      0,
+				captured:   false,
+				captures:   0,
+			}
+			g.pawns[square] = pawn
+		}
+	}
+}
+
+// play tracks pawn moves and changes its properties.
+func (g *Game) play() {
+
+}
+
 func main() {
 	filepath := os.Args[1]
 	f, err := os.Open(filepath)
@@ -274,6 +322,8 @@ func main() {
 			panic(err)
 		}
 		if game != nil {
+			game.setUp()
+			game.play()
 			analyseGame(game)
 		}
 	}

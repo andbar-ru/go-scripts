@@ -190,27 +190,6 @@ func isPawnPly(ply string) bool {
 	return isPawnPlyRegex.MatchString(ply)
 }
 
-func analyseGame(game *Game) {
-	stats.games++
-	var gamePlies, gamePawnPlies int
-
-	for _, move := range game.moves {
-		for _, ply := range move {
-			if ply != "" { // That might be in the last move of a game
-				stats.allPlies++
-				gamePlies++
-
-				if isPawnPly(ply) {
-					stats.pawnPlies++
-					gamePawnPlies++
-				}
-			}
-		}
-	}
-	stats.gamePliesList = append(stats.gamePliesList, gamePlies)
-	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
-}
-
 func (s *Stats) String() string {
 	var output string
 
@@ -307,6 +286,27 @@ func (g *Game) play() {
 
 }
 
+func (g *Game) analyse() {
+	stats.games++
+	var gamePlies, gamePawnPlies int
+
+	for _, move := range g.moves {
+		for _, ply := range move {
+			if ply != "" { // That might be in the last move of a game
+				stats.allPlies++
+				gamePlies++
+
+				if isPawnPly(ply) {
+					stats.pawnPlies++
+					gamePawnPlies++
+				}
+			}
+		}
+	}
+	stats.gamePliesList = append(stats.gamePliesList, gamePlies)
+	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
+}
+
 func main() {
 	filepath := os.Args[1]
 	f, err := os.Open(filepath)
@@ -324,7 +324,7 @@ func main() {
 		if game != nil {
 			game.setUp()
 			game.play()
-			analyseGame(game)
+			game.analyse()
 		}
 	}
 

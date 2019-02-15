@@ -29,6 +29,11 @@ import (
 )
 
 const (
+	white = iota
+	black
+)
+
+const (
 	noPromotion = iota
 	knight
 	bishop
@@ -70,9 +75,23 @@ var (
 		'R': rook,
 		'Q': queen,
 	}
+	fileToString = map[uint8]string{
+		1: "a",
+		2: "b",
+		3: "c",
+		4: "d",
+		5: "e",
+		6: "f",
+		7: "g",
+		8: "h",
+	}
+	colorToString = map[uint8]string{
+		0: "white",
+		1: "black",
+	}
 
-	whitePawns [8]Pawn
-	blackPawns [8]Pawn
+	whitePawns [8]*Pawn
+	blackPawns [8]*Pawn
 	stats      = &Stats{}
 )
 
@@ -96,6 +115,7 @@ type Square struct {
 }
 
 type Pawn struct {
+	color          uint8
 	initSquare     Square
 	promotionCount int
 	moveCount      int
@@ -221,9 +241,10 @@ func isPawnPly(ply string) bool {
 }
 
 // findPawnByPly finds and returns the pawn that made move ply or panics.
-func findPawnByPly(ply string, pawns *[8]Pawn) (foundPawn *Pawn) {
+func findPawnByPly(ply string, pawns [8]*Pawn) (foundPawn *Pawn) {
+	color := pawns[0].color
 	plyParts := pawnPlyRegex.FindStringSubmatch(ply)
-	// fmt.Printf("%s: capture %s, square %s, promotion %s, check %s\n", plyParts[0], plyParts[1], plyParts[2], plyParts[3], plyParts[4])
+
 	squareStr := plyParts[2]
 	if squareStr == "" {
 		panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
@@ -240,24 +261,33 @@ func findPawnByPly(ply string, pawns *[8]Pawn) (foundPawn *Pawn) {
 		candidates := make([]*Pawn, 0)
 		for _, pawn := range pawns {
 			if pawn.promotion == noPromotion && pawn.square != (Square{}) && pawn.square.file == file {
-				candidates = append(candidates, &pawn)
+				candidates = append(candidates, pawn)
 			}
 		}
 		if len(candidates) == 0 {
 			panic(fmt.Sprintf("Could not find pawn for move %s, no candidates", ply))
 		}
 		for _, pawn := range candidates {
-			if pawn.square.rank == rank-1 {
+			if (color == white && pawn.square.rank == rank-1) || (color == black && pawn.square.rank == rank+1) {
 				foundPawn = pawn
 				break
 			}
 		}
 		// First move may be two squares forward.
-		if foundPawn == nil && rank == 4 {
-			for _, pawn := range candidates {
-				if pawn.square.rank == 2 {
-					foundPawn = pawn
-					break
+		if foundPawn == nil {
+			if color == white && rank == 4 {
+				for _, pawn := range candidates {
+					if pawn.square.rank == 2 {
+						foundPawn = pawn
+						break
+					}
+				}
+			} else if color == black && rank == 5 {
+				for _, pawn := range candidates {
+					if pawn.square.rank == 7 {
+						foundPawn = pawn
+						break
+					}
 				}
 			}
 		}
@@ -265,13 +295,18 @@ func findPawnByPly(ply string, pawns *[8]Pawn) (foundPawn *Pawn) {
 			panic(fmt.Sprintf("Could not find pawn for move %s", ply))
 		}
 	} else {
+		if color == white {
+			rank = rank - 1
+		} else if color == black {
+			rank = rank + 1
+		}
 		square := Square{
 			file: byteToFileOrRank[captureStr[0]],
-			rank: rank - 1,
+			rank: rank,
 		}
 		for _, pawn := range pawns {
 			if pawn.promotion == noPromotion && pawn.square != (Square{}) && pawn.square == square {
-				foundPawn = &pawn
+				foundPawn = pawn
 				break
 			}
 		}
@@ -354,6 +389,14 @@ func (parser *PgnParser) nextGame() (game *Game, err error) {
 	return
 }
 
+func (s Square) String() string {
+	return fmt.Sprintf("%s%d", fileToString[s.file], s.rank)
+}
+
+func (p Pawn) String() string {
+	return fmt.Sprintf("%s pawn{initSquare: %s, square: %s}", colorToString[p.color], p.initSquare, p.square)
+}
+
 // setUp sets up the pawn on the game start.
 func (p *Pawn) setUp() {
 	p.square = p.initSquare
@@ -407,14 +450,14 @@ func (g *Game) play() {
 		whitePly := move[0]
 		blackPly := move[1]
 		if !whitePromoted && isPawnPly(whitePly) {
-			pawn := findPawnByPly(whitePly, &whitePawns)
-			fmt.Printf("white: %s %s\n", whitePly, pawn.initSquare)
+			pawn := findPawnByPly(whitePly, whitePawns)
 			pawn.move(whitePly)
+			fmt.Printf("white: %s %s\n", whitePly, pawn)
 		}
 		if !blackPromoted && isPawnPly(blackPly) {
-			pawn := findPawnByPly(blackPly, &blackPawns)
-			fmt.Printf("white: %s %s\n", whitePly, pawn.initSquare)
+			pawn := findPawnByPly(blackPly, blackPawns)
 			pawn.move(blackPly)
+			fmt.Printf("black: %s %s\n", blackPly, pawn)
 		}
 	}
 }
@@ -443,14 +486,16 @@ func (g *Game) analyse() {
 func init() {
 	for i := range whitePawns {
 		square := Square{file: uint8(i) + 1, rank: 2}
-		whitePawns[i] = Pawn{
+		whitePawns[i] = &Pawn{
+			color:      white,
 			initSquare: square,
 			square:     square,
 		}
 	}
 	for i := range blackPawns {
 		square := Square{file: uint8(i) + 1, rank: 7}
-		blackPawns[i] = Pawn{
+		blackPawns[i] = &Pawn{
+			color:      black,
 			initSquare: square,
 			square:     square,
 		}

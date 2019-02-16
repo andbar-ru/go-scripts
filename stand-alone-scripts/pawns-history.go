@@ -488,33 +488,35 @@ func (g *Game) setUp() {
 
 // play tracks game moves and changes pawns' properties.
 func (g *Game) play() {
-	var promoted [2]bool // At least one pawn has been promoted
+	// var promoted [2]bool // At least one pawn has been promoted
 	// var whitePromotions, blackPromotions map[int]bool // What pieces pawns have been promoted
 
 	for _, move := range g.moves {
 		for color, ply := range move {
-			if !promoted[color] {
-				if isPawnPlyRegex.MatchString(ply) {
-					pawn := findPawnByPly(ply, pawns[color])
-					pawn.move(ply)
-					if pawn.promotion != noPromotion {
-						promoted[color] = true
+			// if !promoted[color] {
+			if isPawnPlyRegex.MatchString(ply) {
+				pawn := findPawnByPly(ply, pawns[color])
+				pawn.move(ply)
+			}
+			if isCapturePlyRegex.MatchString(ply) {
+				plyParts := capturePlyRegex.FindStringSubmatch(ply)
+				squareStr := plyParts[1]
+				if squareStr == "" {
+					panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
+				}
+				file := byteFileOrRankMap[squareStr[0]]
+				rank := byteFileOrRankMap[squareStr[1]]
+				if file == 0 || rank == 0 {
+					panic(fmt.Sprintf("Could not make square from ply %s", ply))
+				}
+				square := Square{file: file, rank: rank}
+				// Search opponent pawn on this square. If found, mark it captured
+				for _, pawn := range pawns[color^1] {
+					if pawn.square == square {
+						pawn.capturedCount++
+						pawn.square = Square{}
 					}
 				}
-				if isCapturePlyRegex.MatchString(ply) {
-					plyParts := capturePlyRegex.FindStringSubmatch(ply)
-					if len(plyParts) < 2 {
-						fmt.Println(ply)
-					}
-					squareStr := plyParts[1]
-					if squareStr == "" {
-						panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
-					}
-					fmt.Printf("%s: %s %s\n", colorStringMap[uint8(color)], ply, squareStr)
-				}
-			} else {
-				fmt.Printf("%s: Promoted!!!\n", colorStringMap[uint8(color)])
-				// Consider moves by promotion pieces
 			}
 		}
 	}
@@ -577,13 +579,13 @@ func main() {
 		if game != nil {
 			game.setUp()
 			game.play()
-			// if iccfRegex.MatchString(filepath) {
-			// 	gameId := iccfRegex.FindStringSubmatch(filepath)[1]
-			// 	err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
-			// 	if err != nil {
-			// 		panic(err)
-			// 	}
-			// }
+			if iccfRegex.MatchString(filepath) {
+				gameId := iccfRegex.FindStringSubmatch(filepath)[1]
+				err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
+				if err != nil {
+					panic(err)
+				}
+			}
 			game.analyse()
 		}
 	}

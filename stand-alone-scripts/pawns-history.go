@@ -14,6 +14,8 @@ Objectives:
   - average number of moves for each pawn;
   - how many moves for one death for each pawn;
   - correlation between captures and survival rate;
+
+For iccf games check that final position is right comparing with position on www.iccf.com.
 */
 package main
 
@@ -22,10 +24,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 const (
@@ -42,6 +47,7 @@ const (
 )
 
 var (
+	iccfRegex          = regexp.MustCompile(`game(\d+)\.pgn$`)
 	commentsRegex      = regexp.MustCompile(`{.*?}`)
 	variationsRegex    = regexp.MustCompile(`\(.*?\)`)
 	tagsRegex          = regexp.MustCompile(`\[.*?\]`)
@@ -49,9 +55,11 @@ var (
 	moveNumRegex       = regexp.MustCompile(`\d+\.`)
 	dotWithSpacesRegex = regexp.MustCompile(`\.\s+`)
 	isPawnPlyRegex     = regexp.MustCompile(`^[a-h]`)
-	pawnPlyRegex       = regexp.MustCompile(`^([a-h]x)?([a-h][1-8])(=[NBRQ])?(\+)?$`)
+	isCapturePlyRegex  = regexp.MustCompile(`x`)
+	pawnPlyRegex       = regexp.MustCompile(`^([a-h]x)?([a-h][1-8])(=[NBRQ])?(?:[+#])?$`)
+	capturePlyRegex    = regexp.MustCompile(`^[a-hNBRQK](?:[a-h1-8])?x([a-h][1-8])(?:=[NBRQ])?(?:[+#])?$`)
 	squareRegex        = regexp.MustCompile(`[a-h][1-8]`)
-	byteToFileOrRank   = map[byte]uint8{
+	byteFileOrRankMap  = map[byte]uint8{
 		'a': 1,
 		'b': 2,
 		'c': 3,
@@ -69,13 +77,13 @@ var (
 		'7': 7,
 		'8': 8,
 	}
-	byteToPiece = map[byte]uint8{
+	bytePieceMap = map[byte]uint8{
 		'N': knight,
 		'B': bishop,
 		'R': rook,
 		'Q': queen,
 	}
-	fileToString = map[uint8]string{
+	fileStringMap = map[uint8]string{
 		1: "a",
 		2: "b",
 		3: "c",
@@ -85,14 +93,13 @@ var (
 		7: "g",
 		8: "h",
 	}
-	colorToString = map[uint8]string{
+	colorStringMap = map[uint8]string{
 		0: "white",
 		1: "black",
 	}
 
-	whitePawns [8]*Pawn
-	blackPawns [8]*Pawn
-	stats      = &Stats{}
+	pawns [2][8]*Pawn
+	stats = &Stats{}
 )
 
 type Stats struct {
@@ -119,8 +126,8 @@ type Pawn struct {
 	initSquare     Square
 	promotionCount int
 	moveCount      int
-	captureCount   int
-	capturedCount  int
+	captureCount   int // pawn capture other pieces
+	capturedCount  int // pawn captured by other pieces
 	// in current game
 	square    Square // empty if the pawn has been captured in current game
 	promotion uint8
@@ -236,10 +243,6 @@ func validateMoves(moves []Move, moveText string) error {
 	return nil
 }
 
-func isPawnPly(ply string) bool {
-	return isPawnPlyRegex.MatchString(ply)
-}
-
 // findPawnByPly finds and returns the pawn that made move ply or panics.
 func findPawnByPly(ply string, pawns [8]*Pawn) (foundPawn *Pawn) {
 	color := pawns[0].color
@@ -249,8 +252,8 @@ func findPawnByPly(ply string, pawns [8]*Pawn) (foundPawn *Pawn) {
 	if squareStr == "" {
 		panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
 	}
-	file := byteToFileOrRank[squareStr[0]]
-	rank := byteToFileOrRank[squareStr[1]]
+	file := byteFileOrRankMap[squareStr[0]]
+	rank := byteFileOrRankMap[squareStr[1]]
 	if file == 0 || rank == 0 {
 		panic(fmt.Sprintf("Could not make square from ply %s", ply))
 	}
@@ -301,7 +304,7 @@ func findPawnByPly(ply string, pawns [8]*Pawn) (foundPawn *Pawn) {
 			rank = rank + 1
 		}
 		square := Square{
-			file: byteToFileOrRank[captureStr[0]],
+			file: byteFileOrRankMap[captureStr[0]],
 			rank: rank,
 		}
 		for _, pawn := range pawns {
@@ -316,6 +319,49 @@ func findPawnByPly(ply string, pawns [8]*Pawn) (foundPawn *Pawn) {
 	}
 
 	return
+}
+
+// validateFinalPosition compares pawns final position with final position of the game on url.
+// If they are not the same, returns error.
+// It is suitable only for ICCF games.
+func validateFinalPosition(url string) error {
+	var survivedPawns [2][]*Pawn
+	for color := range pawns {
+		for _, pawn := range pawns[color] {
+			if pawn.promotion == noPromotion && pawn.square != (Square{}) {
+				survivedPawns[color] = append(survivedPawns[color], pawn)
+			}
+		}
+	}
+
+	response, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != 200 {
+		return fmt.Errorf("Status code error: %d %s", response.StatusCode, response.Status)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(response.Body)
+	if err != nil {
+		return err
+	}
+
+	var squaresWithPawn [2]*goquery.Selection
+	squaresWithPawn[white] = doc.Find(".cb-wpw")
+	squaresWithPawn[white] = squaresWithPawn[white].Add(".cb-wpb")
+	squaresWithPawn[black] = doc.Find(".cb-bpw")
+	squaresWithPawn[black] = squaresWithPawn[black].Add(".cb-bpb")
+
+	for color := range survivedPawns {
+		if len(survivedPawns[color]) != squaresWithPawn[color].Length() {
+			return fmt.Errorf("Number of surviving %s pawns does not match: %d != %d", colorStringMap[uint8(color)], len(survivedPawns[color]), squaresWithPawn[color].Length())
+		}
+	}
+
+	return nil
 }
 
 func (s *Stats) String() string {
@@ -390,11 +436,11 @@ func (parser *PgnParser) nextGame() (game *Game, err error) {
 }
 
 func (s Square) String() string {
-	return fmt.Sprintf("%s%d", fileToString[s.file], s.rank)
+	return fmt.Sprintf("%s%d", fileStringMap[s.file], s.rank)
 }
 
 func (p Pawn) String() string {
-	return fmt.Sprintf("%s pawn{initSquare: %s, square: %s}", colorToString[p.color], p.initSquare, p.square)
+	return fmt.Sprintf("%s pawn{initSquare: %s, square: %s}", colorStringMap[p.color], p.initSquare, p.square)
 }
 
 // setUp sets up the pawn on the game start.
@@ -409,21 +455,21 @@ func (p *Pawn) move(ply string) {
 	p.moveCount++
 
 	if plyParts[1] != "" {
-		p.capturedCount++
+		p.captureCount++
 	}
 
 	promotionStr := plyParts[3]
 	if promotionStr != "" {
 		p.promotionCount++
-		p.promotion = byteToPiece[promotionStr[1]]
+		p.promotion = bytePieceMap[promotionStr[1]]
 	}
 
 	squareStr := plyParts[2]
 	if squareStr == "" {
 		panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
 	}
-	file := byteToFileOrRank[squareStr[0]]
-	rank := byteToFileOrRank[squareStr[1]]
+	file := byteFileOrRankMap[squareStr[0]]
+	rank := byteFileOrRankMap[squareStr[1]]
 	if file == 0 || rank == 0 {
 		panic(fmt.Sprintf("Could not make square from ply %s", ply))
 	}
@@ -433,31 +479,43 @@ func (p *Pawn) move(ply string) {
 
 // setUp sets up the pawns.
 func (g *Game) setUp() {
-	for _, pawn := range whitePawns {
-		pawn.setUp()
-	}
-	for _, pawn := range blackPawns {
-		pawn.setUp()
+	for color := range pawns {
+		for _, pawn := range pawns[color] {
+			pawn.setUp()
+		}
 	}
 }
 
-// play tracks pawn moves and changes its properties.
+// play tracks game moves and changes pawns' properties.
 func (g *Game) play() {
-	var whitePromoted, blackPromoted bool // At least one pawn has been promoted
+	var promoted [2]bool // At least one pawn has been promoted
 	// var whitePromotions, blackPromotions map[int]bool // What pieces pawns have been promoted
 
 	for _, move := range g.moves {
-		whitePly := move[0]
-		blackPly := move[1]
-		if !whitePromoted && isPawnPly(whitePly) {
-			pawn := findPawnByPly(whitePly, whitePawns)
-			pawn.move(whitePly)
-			fmt.Printf("white: %s %s\n", whitePly, pawn)
-		}
-		if !blackPromoted && isPawnPly(blackPly) {
-			pawn := findPawnByPly(blackPly, blackPawns)
-			pawn.move(blackPly)
-			fmt.Printf("black: %s %s\n", blackPly, pawn)
+		for color, ply := range move {
+			if !promoted[color] {
+				if isPawnPlyRegex.MatchString(ply) {
+					pawn := findPawnByPly(ply, pawns[color])
+					pawn.move(ply)
+					if pawn.promotion != noPromotion {
+						promoted[color] = true
+					}
+				}
+				if isCapturePlyRegex.MatchString(ply) {
+					plyParts := capturePlyRegex.FindStringSubmatch(ply)
+					if len(plyParts) < 2 {
+						fmt.Println(ply)
+					}
+					squareStr := plyParts[1]
+					if squareStr == "" {
+						panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
+					}
+					fmt.Printf("%s: %s %s\n", colorStringMap[uint8(color)], ply, squareStr)
+				}
+			} else {
+				fmt.Printf("%s: Promoted!!!\n", colorStringMap[uint8(color)])
+				// Consider moves by promotion pieces
+			}
 		}
 	}
 }
@@ -472,7 +530,7 @@ func (g *Game) analyse() {
 				stats.allPlies++
 				gamePlies++
 
-				if isPawnPly(ply) {
+				if isPawnPlyRegex.MatchString(ply) {
 					stats.pawnPlies++
 					gamePawnPlies++
 				}
@@ -484,20 +542,20 @@ func (g *Game) analyse() {
 }
 
 func init() {
-	for i := range whitePawns {
-		square := Square{file: uint8(i) + 1, rank: 2}
-		whitePawns[i] = &Pawn{
-			color:      white,
-			initSquare: square,
-			square:     square,
+	for color := range pawns {
+		var rank uint8
+		if color == white {
+			rank = 2
+		} else {
+			rank = 7
 		}
-	}
-	for i := range blackPawns {
-		square := Square{file: uint8(i) + 1, rank: 7}
-		blackPawns[i] = &Pawn{
-			color:      black,
-			initSquare: square,
-			square:     square,
+		for i := range pawns[color] {
+			square := Square{file: uint8(i) + 1, rank: rank}
+			pawns[color][i] = &Pawn{
+				color:      uint8(color),
+				initSquare: square,
+				square:     square,
+			}
 		}
 	}
 }
@@ -519,6 +577,13 @@ func main() {
 		if game != nil {
 			game.setUp()
 			game.play()
+			// if iccfRegex.MatchString(filepath) {
+			// 	gameId := iccfRegex.FindStringSubmatch(filepath)[1]
+			// 	err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
+			// 	if err != nil {
+			// 		panic(err)
+			// 	}
+			// }
 			game.analyse()
 		}
 	}

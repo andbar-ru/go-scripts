@@ -25,7 +25,7 @@ import (
 	"io"
 	"math"
 	// "net/http"
-	// "os"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -55,12 +55,13 @@ var (
 	moveRegex          = regexp.MustCompile(`(\d+\.+)?(.*)`)
 	moveNumRegex       = regexp.MustCompile(`\d+\.`)
 	dotWithSpacesRegex = regexp.MustCompile(`\.\s+`)
+	plyRegex           = regexp.MustCompile(`^([NBRQK])?([a-h1-8])?(x)?([a-h][1-8]|O-O(?:-O)?)(=[NBRQ])?(?:[+#])?$`)
 	isPawnPlyRegex     = regexp.MustCompile(`^[a-h]`)
-	isCapturePlyRegex  = regexp.MustCompile(`x`)
-	pawnPlyRegex       = regexp.MustCompile(`^([a-h]x)?([a-h][1-8])(=[NBRQ])?(?:[+#])?$`)
-	capturePlyRegex    = regexp.MustCompile(`^[a-hNBRQK](?:[a-h1-8])?x([a-h][1-8])(?:=[NBRQ])?(?:[+#])?$`)
-	squareRegex        = regexp.MustCompile(`[a-h][1-8]`)
-	byteFileOrRankMap  = map[byte]uint8{
+	isEnPassantRegex   = regexp.MustCompile(`^[a-h]x[a-h][36](?:[+#])?$`)
+
+	pawnPlyRegex      = regexp.MustCompile(`^([a-h]x)?([a-h][1-8])(=[NBRQ])?(?:[+#])?$`)
+	capturePlyRegex   = regexp.MustCompile(`^[a-hNBRQK](?:[a-h1-8])?x([a-h][1-8])(?:=[NBRQ])?(?:[+#])?$`)
+	byteFileOrRankMap = map[byte]uint8{
 		'a': 1,
 		'b': 2,
 		'c': 3,
@@ -106,10 +107,18 @@ var (
 		queen:  "q",
 		king:   "k",
 	}
+	pieceStringMap = map[uint8]string{
+		pawn:   "pawn",
+		knight: "knight",
+		bishop: "bishop",
+		rook:   "rook",
+		queen:  "queen",
+		king:   "king",
+	}
 
-	board  = Board{}
-	pieces [2][16]*Piece
-	stats  = &Stats{}
+	board     = &Board{}
+	allPieces [2][16]*Piece // pieces in order: ppppppppnnbbrrqk
+	stats     = &Stats{}
 )
 
 type Stats struct {
@@ -134,6 +143,7 @@ type Square struct {
 
 type Board struct {
 	squares [8][8]*Square
+	pieces  [2]map[uint8]map[*Piece]bool // easy for searching and deleting
 }
 
 type Piece struct {
@@ -152,6 +162,12 @@ type Move [2]string
 
 type Game struct {
 	moves []Move
+}
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
 
 func getPercent(fraction, total float64) float64 {
@@ -237,9 +253,7 @@ func validateMoves(moves []Move, moveText string) error {
 	lastMoveNumStr := moveNumsStrs[len(moveNumsStrs)-1]
 	lastMoveNumStr = lastMoveNumStr[:len(lastMoveNumStr)-1]
 	lastMoveNum, err := strconv.Atoi(lastMoveNumStr)
-	if err != nil {
-		return err
-	}
+	check(err)
 	if len(moves) != lastMoveNum {
 		return fmt.Errorf("Number of moves (%d) does not match the lat move number (%d)", len(moves), lastMoveNum)
 	}
@@ -353,9 +367,7 @@ func validateFinalPosition(url string) error {
 	}
 
 	response, err := http.Get(url)
-	if err != nil {
-		return err
-	}
+	check(err)
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
@@ -363,9 +375,7 @@ func validateFinalPosition(url string) error {
 	}
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
-	if err != nil {
-		return err
-	}
+	check(err)
 
 	var squaresWithPawn [2]*goquery.Selection
 	squaresWithPawn[white] = doc.Find(".cb-wpw")
@@ -382,22 +392,6 @@ func validateFinalPosition(url string) error {
 	return nil
 }
 */
-
-// Init piece at the first setup.
-func initPiece(color, index int, pieceType, file, rank uint8) {
-	square, err := board.getSquare(file, rank)
-	if err != nil {
-		panic(err)
-	}
-	piece := &Piece{
-		color:      uint8(color),
-		initType:   pieceType,
-		curType:    pieceType,
-		initSquare: square,
-	}
-	board.setPieceOnSquare(piece, file, rank)
-	pieces[color][index] = piece
-}
 
 func (s *Stats) String() string {
 	var output string
@@ -420,9 +414,7 @@ func (s *Stats) getCorrelationBetweenPawnFractionAndGamePlies() float64 {
 		fractions[i] = float64(v) / plies[i]
 	}
 	correlation, err := getCorrelation(plies, fractions)
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 	return correlation
 }
 
@@ -474,16 +466,14 @@ func (s Square) String() string {
 	return fmt.Sprintf("%s%d", fileStringMap[s.file], s.rank)
 }
 
-func (b *Board) String() string {
+func (b Board) String() string {
 	var output string
 	output += "┌───┬───┬───┬───┬───┬───┬───┬───┐\n"
 
 	for rank := 8; rank >= 1; rank-- {
 		for file := range b.squares {
 			square, err := b.getSquare(uint8(file+1), uint8(rank))
-			if err != nil {
-				panic(err)
-			}
+			check(err)
 			output += "│ "
 			if square.piece != nil {
 				output += square.piece.symbol()
@@ -493,7 +483,7 @@ func (b *Board) String() string {
 			output += " "
 		}
 		output += "│\n"
-		if rank > 1 {
+		if rank != 1 {
 			output += "├───┼───┼───┼───┼───┼───┼───┼───┤\n"
 		} else {
 			output += "└───┴───┴───┴───┴───┴───┴───┴───┘\n"
@@ -513,16 +503,143 @@ func (b *Board) getSquare(file, rank uint8) (*Square, error) {
 	return b.squares[file-1][rank-1], nil
 }
 
-func (b *Board) setPieceOnSquare(piece *Piece, file, rank uint8) error {
-	square, err := b.getSquare(file, rank)
-	if err != nil {
-		return err
+func (b *Board) getSquareString(str string) (*Square, error) {
+	file := byteFileOrRankMap[str[0]]
+	rank := byteFileOrRankMap[str[1]]
+	return b.getSquare(file, rank)
+}
+
+func (b *Board) setPieceOnSquare(piece *Piece, square *Square) {
+	if piece.curSquare != nil {
+		piece.curSquare.piece = nil
 	}
 	square.piece = piece
 	piece.curSquare = square
-	return nil
+	piece.moveCount++
 }
 
+// capture removes captured piece from the board.
+func (b *Board) capture(plyParts []string, color uint8) {
+	square, err := b.getSquareString(plyParts[4])
+	check(err)
+
+	// Search piece of other color on the square.
+	piece := square.piece
+	if piece == nil { // en passant?
+		if !isEnPassantRegex.MatchString(plyParts[0]) {
+			panic("Capture of unknown piece")
+		}
+		file := byteFileOrRankMap[plyParts[2][0]]
+		if color == white && square.rank == 6 {
+			square, _ := b.getSquare(file, 5)
+			piece = square.piece
+			if piece == nil || piece.curType != pawn || piece.color == color {
+				panic("En passant of unknown pawn")
+			}
+		}
+		if color == black && square.rank == 3 {
+			square, _ := b.getSquare(file, 4)
+			piece = square.piece
+			if piece == nil || piece.curType != pawn || piece.color == color {
+				panic("En passant of unknown pawn")
+			}
+		}
+	}
+	if piece == nil || piece.color == color {
+		panic("Capture of unknown piece")
+	}
+	// Remove the piece.
+	square.piece = nil
+	piece.curSquare = nil
+	piece.capturedCount++
+	delete(b.pieces[color^1][piece.curType], piece)
+}
+
+func (b *Board) movePawn(plyParts []string, color uint8) {
+	square, err := b.getSquareString(plyParts[4])
+	check(err)
+
+	// Get piece
+	var piece *Piece
+	var step int
+	if color == white {
+		step = -1
+	} else {
+		step = 1
+	}
+	if plyParts[1] == "" {
+		srcSquare, err := b.getSquare(square.file, uint8(int(square.rank)+step))
+		check(err)
+		piece = srcSquare.piece
+		if piece == nil {
+			srcSquare, err = b.getSquare(square.file, uint8(int(square.rank)+2*step))
+			check(err)
+			piece = srcSquare.piece
+		}
+	} else {
+		srcFile := byteFileOrRankMap[plyParts[1][0]]
+		srcSquare, err := b.getSquare(srcFile, uint8(int(square.rank)+step))
+		check(err)
+		piece = srcSquare.piece
+	}
+	if piece == nil || piece.curType != pawn || piece.color != color {
+		panic("Unknown pawn move")
+	}
+
+	// special case - pawn promotion
+	if (color == white && square.rank == 8) || (color == black && square.rank == 1) {
+		promotion := plyParts[5]
+		if promotion == "" {
+			panic("Pawn has reached back rank without promotion")
+		}
+		pieceType := bytePieceMap[promotion[1]]
+		piece.curType = pieceType
+		piece.promotionCount++
+	}
+
+	if plyParts[3] == "x" {
+		piece.capturedCount++
+	}
+
+	b.setPieceOnSquare(piece, square)
+}
+
+// move makes move and modifies board and pieces.
+func (b *Board) move(ply string, color uint8) {
+	plyParts := plyRegex.FindStringSubmatch(ply)
+	if len(plyParts) == 0 {
+		panic(fmt.Sprintf("Unexpected ply: %s", ply))
+	}
+
+	// First captures
+	if plyParts[3] == "x" {
+		b.capture(plyParts, color)
+	}
+
+	if plyParts[1] == "" && ply[0] != 'O' {
+		b.movePawn(plyParts, color)
+	}
+}
+
+// setUp sets up all pieces before game starts.
+func (b *Board) setUp() {
+	for color := range board.pieces {
+		board.pieces[color] = make(map[uint8]map[*Piece]bool)
+	}
+
+	for color := range allPieces {
+		for _, piece := range allPieces[color] {
+			piece.curType = piece.initType // for pawns
+			b.setPieceOnSquare(piece, piece.initSquare)
+			if board.pieces[color][piece.curType] == nil {
+				board.pieces[color][piece.curType] = make(map[*Piece]bool)
+			}
+			board.pieces[color][piece.curType][piece] = true
+		}
+	}
+}
+
+// symbol returns one symbol representing the piece.
 func (p *Piece) symbol() string {
 	symbol := pieceSymbolMap[p.curType]
 	if p.color == white {
@@ -531,102 +648,27 @@ func (p *Piece) symbol() string {
 	return symbol
 }
 
-// setUp sets up the pawn on the game start.
-/*
-func (p *Pawn) setUp() {
-	p.square = p.initSquare
-	p.promotion = noPromotion
+// String implements interface Stringer.
+func (p *Piece) String() string {
+	return fmt.Sprintf("%s %s{initSquare: %s, curSquare: %s}", colorStringMap[p.color], pieceStringMap[p.curType], p.initSquare, p.curSquare)
 }
-*/
 
-// move applies ply to the pawn.
-/*
-func (p *Pawn) move(ply string) {
-	plyParts := pawnPlyRegex.FindStringSubmatch(ply)
-	p.moveCount++
-
-	if plyParts[1] != "" {
-		p.captureCount++
-	}
-
-	promotionStr := plyParts[3]
-	if promotionStr != "" {
-		p.promotionCount++
-		p.promotion = bytePieceMap[promotionStr[1]]
-	}
-
-	squareStr := plyParts[2]
-	if squareStr == "" {
-		panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
-	}
-	file := byteFileOrRankMap[squareStr[0]]
-	rank := byteFileOrRankMap[squareStr[1]]
-	if file == 0 || rank == 0 {
-		panic(fmt.Sprintf("Could not make square from ply %s", ply))
-	}
-	square := Square{file: file, rank: rank}
-	p.square = square
-}
-*/
-
-// setUp sets up the pawns.
-/*
-func (g *Game) setUp() {
-	for color := range pawns {
-		for _, pawn := range pawns[color] {
-			pawn.setUp()
-		}
-	}
-}
-*/
-
-// play tracks game moves and changes pawns' properties.
-/*
+// play tracks game moves and gathers statistics.
 func (g *Game) play() {
 	// var promoted [2]bool // At least one pawn has been promoted
 	// var whitePromotions, blackPromotions map[int]bool // What pieces pawns have been promoted
-
-	for _, move := range g.moves {
-		for color, ply := range move {
-			// if !promoted[color] {
-			if isPawnPlyRegex.MatchString(ply) {
-				pawn := findPawnByPly(ply, pawns[color])
-				pawn.move(ply)
-			}
-			if isCapturePlyRegex.MatchString(ply) {
-				plyParts := capturePlyRegex.FindStringSubmatch(ply)
-				squareStr := plyParts[1]
-				if squareStr == "" {
-					panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
-				}
-				file := byteFileOrRankMap[squareStr[0]]
-				rank := byteFileOrRankMap[squareStr[1]]
-				if file == 0 || rank == 0 {
-					panic(fmt.Sprintf("Could not make square from ply %s", ply))
-				}
-				square := Square{file: file, rank: rank}
-				// Search opponent pawn on this square. If found, mark it captured
-				for _, pawn := range pawns[color^1] {
-					if pawn.square == square {
-						pawn.capturedCount++
-						pawn.square = Square{}
-					}
-				}
-			}
-		}
-	}
-}
-*/
-
-func (g *Game) analyse() {
 	stats.games++
 	var gamePlies, gamePawnPlies int
 
 	for _, move := range g.moves {
-		for _, ply := range move {
-			if ply != "" { // That might be in the last move of a game
+		for color, ply := range move {
+			if ply != "" { // black ply in the last move
 				stats.allPlies++
 				gamePlies++
+
+				board.move(ply, uint8(color))
+				fmt.Println(ply)
+				fmt.Println(board)
 
 				if isPawnPlyRegex.MatchString(ply) {
 					stats.pawnPlies++
@@ -637,6 +679,36 @@ func (g *Game) analyse() {
 	}
 	stats.gamePliesList = append(stats.gamePliesList, gamePlies)
 	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
+
+	// for _, move := range g.moves {
+	// 	for color, ply := range move {
+	// 		// if !promoted[color] {
+	// 		if isPawnPlyRegex.MatchString(ply) {
+	// 			pawn := findPawnByPly(ply, pawns[color])
+	// 			pawn.move(ply)
+	// 		}
+	// 		if isCapturePlyRegex.MatchString(ply) {
+	// 			plyParts := capturePlyRegex.FindStringSubmatch(ply)
+	// 			squareStr := plyParts[1]
+	// 			if squareStr == "" {
+	// 				panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
+	// 			}
+	// 			file := byteFileOrRankMap[squareStr[0]]
+	// 			rank := byteFileOrRankMap[squareStr[1]]
+	// 			if file == 0 || rank == 0 {
+	// 				panic(fmt.Sprintf("Could not make square from ply %s", ply))
+	// 			}
+	// 			square := Square{file: file, rank: rank}
+	// 			// Search opponent pawn on this square. If found, mark it captured
+	// 			for _, pawn := range pawns[color^1] {
+	// 				if pawn.square == square {
+	// 					pawn.capturedCount++
+	// 					pawn.square = Square{}
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
 }
 
 func init() {
@@ -650,8 +722,22 @@ func init() {
 		}
 	}
 	// Init pieces
-	var index int
-	for color := range pieces {
+	var index, color int
+
+	var initPiece = func(pieceType, file, rank uint8) {
+		square, err := board.getSquare(file, rank)
+		check(err)
+		piece := &Piece{
+			color:      uint8(color),
+			initType:   pieceType,
+			curType:    pieceType,
+			initSquare: square,
+		}
+		allPieces[color][index] = piece
+		index++
+	}
+
+	for color = range allPieces {
 		var rank uint8
 		index = 0
 
@@ -661,9 +747,8 @@ func init() {
 		} else {
 			rank = 7
 		}
-		for file := 1; file <= 8; file++ {
-			initPiece(color, index, pawn, uint8(file), rank)
-			index++
+		for file := uint8(1); file <= 8; file++ {
+			initPiece(pawn, file, rank)
 		}
 
 		// Pieces
@@ -672,60 +757,40 @@ func init() {
 		} else {
 			rank = 8
 		}
-		// Rooks
-		for _, file := range [2]uint8{1, 8} {
-			initPiece(color, index, rook, file, rank)
-			index++
-		}
-		// Knights
 		for _, file := range [2]uint8{2, 7} {
-			initPiece(color, index, knight, file, rank)
-			index++
+			initPiece(knight, file, rank)
 		}
-		// Bishops
 		for _, file := range [2]uint8{3, 6} {
-			initPiece(color, index, bishop, file, rank)
-			index++
+			initPiece(bishop, file, rank)
 		}
-		// Queen
-		initPiece(color, index, queen, 4, rank)
-		index++
-		// King
-		initPiece(color, index, king, 5, rank)
-		index++
+		for _, file := range [2]uint8{1, 8} {
+			initPiece(rook, file, rank)
+		}
+		initPiece(queen, 4, rank)
+		initPiece(king, 5, rank)
 	}
 }
 
 func main() {
-	fmt.Println(&board)
-	/*
-		filepath := os.Args[1]
-		f, err := os.Open(filepath)
-		if err != nil {
-			panic(err)
-		}
-		defer f.Close()
+	filepath := os.Args[1]
+	f, err := os.Open(filepath)
+	check(err)
+	defer f.Close()
 
-		parser := newPgnParser(f)
-		for parser.hasNextGame() {
-			game, err := parser.nextGame()
-			if err != nil {
-				panic(err)
-			}
-			if game != nil {
-				game.setUp()
-				game.play()
-				if iccfRegex.MatchString(filepath) {
-					gameId := iccfRegex.FindStringSubmatch(filepath)[1]
-					err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
-					if err != nil {
-						panic(err)
-					}
-				}
-				game.analyse()
-			}
+	parser := newPgnParser(f)
+	for parser.hasNextGame() {
+		game, err := parser.nextGame()
+		check(err)
+		if game != nil {
+			board.setUp()
+			game.play()
+			// if iccfRegex.MatchString(filepath) {
+			// 	gameId := iccfRegex.FindStringSubmatch(filepath)[1]
+			// 	err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
+			// check(err)
+			// }
 		}
+	}
 
-		fmt.Println(stats)
-	*/
+	fmt.Println(stats)
 }

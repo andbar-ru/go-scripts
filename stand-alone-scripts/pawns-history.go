@@ -59,8 +59,6 @@ var (
 	isPawnPlyRegex     = regexp.MustCompile(`^[a-h]`)
 	isEnPassantRegex   = regexp.MustCompile(`^[a-h]x[a-h][36](?:[+#])?$`)
 
-	pawnPlyRegex      = regexp.MustCompile(`^([a-h]x)?([a-h][1-8])(=[NBRQ])?(?:[+#])?$`)
-	capturePlyRegex   = regexp.MustCompile(`^[a-hNBRQK](?:[a-h1-8])?x([a-h][1-8])(?:=[NBRQ])?(?:[+#])?$`)
 	byteFileOrRankMap = map[byte]uint8{
 		'a': 1,
 		'b': 2,
@@ -143,7 +141,6 @@ type Square struct {
 
 type Board struct {
 	squares [8][8]*Square
-	pieces  [2]map[uint8]map[*Piece]bool // easy for searching and deleting
 }
 
 type Piece struct {
@@ -272,85 +269,48 @@ func validateMoves(moves []Move, moveText string) error {
 	return nil
 }
 
-// findPawnByPly finds and returns the pawn that made move ply or panics.
-/*
-func findPawnByPly(ply string, pawns [8]*Pawn) (foundPawn *Pawn) {
-	color := pawns[0].color
-	plyParts := pawnPlyRegex.FindStringSubmatch(ply)
-
-	squareStr := plyParts[2]
-	if squareStr == "" {
-		panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
+func pickPiece(pieces []*Piece, plyParts []string) (*Piece, error) {
+	if len(pieces) == 0 {
+		return nil, fmt.Errorf("There are no pieces to pick from for ply %s", plyParts[0])
 	}
-	file := byteFileOrRankMap[squareStr[0]]
-	rank := byteFileOrRankMap[squareStr[1]]
-	if file == 0 || rank == 0 {
-		panic(fmt.Sprintf("Could not make square from ply %s", ply))
+	if len(pieces) == 1 {
+		if plyParts[2] != "" {
+			return nil, fmt.Errorf("Must be more than one piece to pick from for ply %s", plyParts[0])
+		}
+		return pieces[0], nil
 	}
-
-	captureStr := plyParts[1]
-	// There is no capture, pawn must be on the square file.
-	if captureStr == "" {
-		candidates := make([]*Pawn, 0)
-		for _, pawn := range pawns {
-			if pawn.promotion == noPromotion && pawn.square != (Square{}) && pawn.square.file == file {
-				candidates = append(candidates, pawn)
-			}
-		}
-		if len(candidates) == 0 {
-			panic(fmt.Sprintf("Could not find pawn for move %s, no candidates", ply))
-		}
-		for _, pawn := range candidates {
-			if (color == white && pawn.square.rank == rank-1) || (color == black && pawn.square.rank == rank+1) {
-				foundPawn = pawn
-				break
-			}
-		}
-		// First move may be two squares forward.
-		if foundPawn == nil {
-			if color == white && rank == 4 {
-				for _, pawn := range candidates {
-					if pawn.square.rank == 2 {
-						foundPawn = pawn
-						break
-					}
+	// len(pieces) > 1
+	if plyParts[2] == "" {
+		return nil, fmt.Errorf("There are multiple pieces to pick from but there are no extra info about source square. Ply %s", plyParts[0])
+	}
+	source := plyParts[2][0]
+	var foundPiece *Piece
+	if source >= 97 && source <= 104 { // a-h
+		file := byteFileOrRankMap[source]
+		for _, piece := range pieces {
+			if piece.curSquare.file == file {
+				if foundPiece != nil {
+					return nil, fmt.Errorf("Multiple pieces are suitable for move %s", plyParts[0])
 				}
-			} else if color == black && rank == 5 {
-				for _, pawn := range candidates {
-					if pawn.square.rank == 7 {
-						foundPawn = pawn
-						break
-					}
+				foundPiece = piece
+			}
+		}
+	} else if source >= 49 && source <= 56 { // 1-8
+		rank := byteFileOrRankMap[source]
+		for _, piece := range pieces {
+			if piece.curSquare.rank == rank {
+				if foundPiece != nil {
+					return nil, fmt.Errorf("Multiple pieces are suitable for move %s", plyParts[0])
 				}
+				foundPiece = piece
 			}
-		}
-		if foundPawn == nil {
-			panic(fmt.Sprintf("Could not find pawn for move %s", ply))
-		}
-	} else {
-		if color == white {
-			rank = rank - 1
-		} else if color == black {
-			rank = rank + 1
-		}
-		square := Square{
-			file: byteFileOrRankMap[captureStr[0]],
-			rank: rank,
-		}
-		for _, pawn := range pawns {
-			if pawn.promotion == noPromotion && pawn.square != (Square{}) && pawn.square == square {
-				foundPawn = pawn
-				break
-			}
-		}
-		if foundPawn == nil {
-			panic(fmt.Sprintf("Could not find pawn for move %s", ply))
 		}
 	}
-
-	return
+	if foundPiece == nil {
+		return nil, fmt.Errorf("Could not find piece for move %s", plyParts[0])
+	}
+	return foundPiece, nil
 }
-*/
 
 // validateFinalPosition compares pawns final position with final position of the game on url.
 // If they are not the same, returns error.
@@ -552,14 +512,13 @@ func (b *Board) capture(plyParts []string, color uint8) {
 	square.piece = nil
 	piece.curSquare = nil
 	piece.capturedCount++
-	delete(b.pieces[color^1][piece.curType], piece)
 }
 
 func (b *Board) movePawn(plyParts []string, color uint8) {
 	square, err := b.getSquareString(plyParts[4])
 	check(err)
 
-	// Get piece
+	// Search piece
 	var piece *Piece
 	var step int
 	if color == white {
@@ -600,7 +559,43 @@ func (b *Board) movePawn(plyParts []string, color uint8) {
 	if plyParts[3] == "x" {
 		piece.capturedCount++
 	}
+	b.setPieceOnSquare(piece, square)
+}
 
+func (b *Board) moveKnight(plyParts []string, color uint8) {
+	square, err := b.getSquareString(plyParts[4])
+	check(err)
+
+	// Collect candidate source squares
+	srcSquares := make([]*Square, 0, 8)
+	steps := [2]int{1, 2}
+	factors := [2]int{-1, 1}
+	for i := range steps {
+		for _, f1 := range factors {
+			for _, f2 := range factors {
+				file := uint8(int(square.file) + steps[i]*f1)
+				rank := uint8(int(square.rank) + steps[i^1]*f2)
+				if srcSquare, err := b.getSquare(file, rank); err == nil {
+					srcSquares = append(srcSquares, srcSquare)
+				}
+			}
+		}
+	}
+
+	// Search candidate pieces
+	pieces := make([]*Piece, 0, 2)
+	for _, srcSquare := range srcSquares {
+		piece := srcSquare.piece
+		if piece != nil && piece.color == color && piece.curType == knight {
+			pieces = append(pieces, piece)
+		}
+	}
+	piece, err := pickPiece(pieces, plyParts)
+	check(err)
+
+	if plyParts[3] == "x" {
+		piece.capturedCount++
+	}
 	b.setPieceOnSquare(piece, square)
 }
 
@@ -618,23 +613,17 @@ func (b *Board) move(ply string, color uint8) {
 
 	if plyParts[1] == "" && ply[0] != 'O' {
 		b.movePawn(plyParts, color)
+	} else if plyParts[1] == "N" {
+		b.moveKnight(plyParts, color)
 	}
 }
 
 // setUp sets up all pieces before game starts.
 func (b *Board) setUp() {
-	for color := range board.pieces {
-		board.pieces[color] = make(map[uint8]map[*Piece]bool)
-	}
-
 	for color := range allPieces {
 		for _, piece := range allPieces[color] {
 			piece.curType = piece.initType // for pawns
 			b.setPieceOnSquare(piece, piece.initSquare)
-			if board.pieces[color][piece.curType] == nil {
-				board.pieces[color][piece.curType] = make(map[*Piece]bool)
-			}
-			board.pieces[color][piece.curType][piece] = true
 		}
 	}
 }
@@ -655,8 +644,6 @@ func (p *Piece) String() string {
 
 // play tracks game moves and gathers statistics.
 func (g *Game) play() {
-	// var promoted [2]bool // At least one pawn has been promoted
-	// var whitePromotions, blackPromotions map[int]bool // What pieces pawns have been promoted
 	stats.games++
 	var gamePlies, gamePawnPlies int
 
@@ -679,36 +666,6 @@ func (g *Game) play() {
 	}
 	stats.gamePliesList = append(stats.gamePliesList, gamePlies)
 	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
-
-	// for _, move := range g.moves {
-	// 	for color, ply := range move {
-	// 		// if !promoted[color] {
-	// 		if isPawnPlyRegex.MatchString(ply) {
-	// 			pawn := findPawnByPly(ply, pawns[color])
-	// 			pawn.move(ply)
-	// 		}
-	// 		if isCapturePlyRegex.MatchString(ply) {
-	// 			plyParts := capturePlyRegex.FindStringSubmatch(ply)
-	// 			squareStr := plyParts[1]
-	// 			if squareStr == "" {
-	// 				panic(fmt.Sprintf("Could not fetch square from ply %s", ply))
-	// 			}
-	// 			file := byteFileOrRankMap[squareStr[0]]
-	// 			rank := byteFileOrRankMap[squareStr[1]]
-	// 			if file == 0 || rank == 0 {
-	// 				panic(fmt.Sprintf("Could not make square from ply %s", ply))
-	// 			}
-	// 			square := Square{file: file, rank: rank}
-	// 			// Search opponent pawn on this square. If found, mark it captured
-	// 			for _, pawn := range pawns[color^1] {
-	// 				if pawn.square == square {
-	// 					pawn.capturedCount++
-	// 					pawn.square = Square{}
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
 }
 
 func init() {

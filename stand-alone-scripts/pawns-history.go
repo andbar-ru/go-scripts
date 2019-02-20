@@ -469,13 +469,17 @@ func (b *Board) getSquareString(str string) (*Square, error) {
 	return b.getSquare(file, rank)
 }
 
-func (b *Board) setPieceOnSquare(piece *Piece, square *Square) {
+func (b *Board) movePieceOnSquare(piece *Piece, square *Square) {
 	if piece.curSquare != nil {
 		piece.curSquare.piece = nil
+	}
+	if square.piece != nil {
+		panic(fmt.Sprintf("Square %s is occupied by %s", square, square.piece))
 	}
 	square.piece = piece
 	piece.curSquare = square
 	piece.moveCount++
+	fmt.Println(pieceStringMap[piece.curType], piece.initSquare, piece.moveCount)
 }
 
 // capture removes captured piece from the board.
@@ -526,7 +530,7 @@ func (b *Board) movePawn(plyParts []string, color uint8) {
 	} else {
 		step = 1
 	}
-	if plyParts[1] == "" {
+	if plyParts[3] == "" {
 		srcSquare, err := b.getSquare(square.file, uint8(int(square.rank)+step))
 		check(err)
 		piece = srcSquare.piece
@@ -536,7 +540,7 @@ func (b *Board) movePawn(plyParts []string, color uint8) {
 			piece = srcSquare.piece
 		}
 	} else {
-		srcFile := byteFileOrRankMap[plyParts[1][0]]
+		srcFile := byteFileOrRankMap[plyParts[2][0]]
 		srcSquare, err := b.getSquare(srcFile, uint8(int(square.rank)+step))
 		check(err)
 		piece = srcSquare.piece
@@ -559,15 +563,15 @@ func (b *Board) movePawn(plyParts []string, color uint8) {
 	if plyParts[3] == "x" {
 		piece.capturedCount++
 	}
-	b.setPieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square)
 }
 
 func (b *Board) moveKnight(plyParts []string, color uint8) {
 	square, err := b.getSquareString(plyParts[4])
 	check(err)
 
-	// Collect candidate source squares
-	srcSquares := make([]*Square, 0, 8)
+	// Collect candidate pieces
+	pieces := make([]*Piece, 0, 2)
 	steps := [2]int{1, 2}
 	factors := [2]int{-1, 1}
 	for i := range steps {
@@ -575,28 +579,132 @@ func (b *Board) moveKnight(plyParts []string, color uint8) {
 			for _, f2 := range factors {
 				file := uint8(int(square.file) + steps[i]*f1)
 				rank := uint8(int(square.rank) + steps[i^1]*f2)
-				if srcSquare, err := b.getSquare(file, rank); err == nil {
-					srcSquares = append(srcSquares, srcSquare)
+				srcSquare, err := b.getSquare(file, rank)
+				if err == nil {
+					piece := srcSquare.piece
+					if piece != nil && piece.color == color && piece.curType == knight {
+						pieces = append(pieces, piece)
+					}
 				}
 			}
 		}
 	}
 
-	// Search candidate pieces
-	pieces := make([]*Piece, 0, 2)
-	for _, srcSquare := range srcSquares {
-		piece := srcSquare.piece
-		if piece != nil && piece.color == color && piece.curType == knight {
-			pieces = append(pieces, piece)
-		}
-	}
 	piece, err := pickPiece(pieces, plyParts)
 	check(err)
 
 	if plyParts[3] == "x" {
 		piece.capturedCount++
 	}
-	b.setPieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square)
+}
+
+func (b *Board) moveBishop(plyParts []string, color uint8) {
+	square, err := b.getSquareString(plyParts[4])
+	check(err)
+
+	// Collect candidate pieces
+	pieces := make([]*Piece, 0, 1)
+	factors := [2]int{-1, 1}
+	for _, f1 := range factors {
+		for _, f2 := range factors {
+			step := 1
+			for {
+				file := uint8(int(square.file) + step*f1)
+				rank := uint8(int(square.rank) + step*f2)
+				srcSquare, err := b.getSquare(file, rank)
+				if err != nil {
+					break
+				}
+				piece := srcSquare.piece
+				if piece != nil {
+					if piece.color == color && piece.curType == bishop {
+						pieces = append(pieces, piece)
+					}
+					break
+				}
+				step++
+			}
+		}
+	}
+
+	piece, err := pickPiece(pieces, plyParts)
+	check(err)
+
+	if plyParts[3] == "x" {
+		piece.capturedCount++
+	}
+	b.movePieceOnSquare(piece, square)
+}
+
+func (b *Board) moveKing(plyParts []string, color uint8) {
+	// Castling
+	if plyParts[4] == "O-O" || plyParts[4] == "O-O-O" {
+		var kingFile, rookFile, rank, kingDestFile, rookDestFile uint8
+		kingFile = 5
+		if color == white {
+			rank = 1
+		} else {
+			rank = 8
+		}
+		if plyParts[4] == "O-O" {
+			rookFile = 8
+			kingDestFile = 7
+			rookDestFile = 6
+		} else {
+			rookFile = 1
+			kingDestFile = 3
+			rookDestFile = 4
+		}
+
+		kingSquare, _ := b.getSquare(kingFile, rank)
+		kingPiece := kingSquare.piece
+		if kingPiece == nil || kingPiece.color != color || kingPiece.curType != king {
+			panic(fmt.Sprintf("%s: could not find king", plyParts[0]))
+		}
+		rookSquare, _ := b.getSquare(rookFile, rank)
+		rookPiece := rookSquare.piece
+		if rookPiece == nil || rookPiece.color != color || rookPiece.curType != rook {
+			panic(fmt.Sprintf("%s: could not find rook", plyParts[0]))
+		}
+		kingDestSquare, _ := b.getSquare(kingDestFile, rank)
+		rookDestSquare, _ := b.getSquare(rookDestFile, rank)
+
+		b.movePieceOnSquare(kingPiece, kingDestSquare)
+		b.movePieceOnSquare(rookPiece, rookDestSquare)
+	} else {
+		square, err := b.getSquareString(plyParts[4])
+		check(err)
+
+		// Collect candidate pieces
+		pieces := make([]*Piece, 0, 1)
+		steps := [3]int{-1, 0, 1}
+		for _, fileStep := range steps {
+			for _, rankStep := range steps {
+				if fileStep == 0 && rankStep == 0 {
+					continue
+				}
+				file := uint8(int(square.file) + fileStep)
+				rank := uint8(int(square.rank) + rankStep)
+				srcSquare, err := b.getSquare(file, rank)
+				if err != nil {
+					continue
+				}
+				piece := srcSquare.piece
+				if piece != nil && piece.color == color && piece.curType == king {
+					pieces = append(pieces, piece)
+				}
+			}
+		}
+
+		piece, err := pickPiece(pieces, plyParts)
+		check(err)
+
+		if plyParts[3] == "x" {
+			piece.capturedCount++
+		}
+		b.movePieceOnSquare(piece, square)
+	}
 }
 
 // move makes move and modifies board and pieces.
@@ -611,10 +719,16 @@ func (b *Board) move(ply string, color uint8) {
 		b.capture(plyParts, color)
 	}
 
-	if plyParts[1] == "" && ply[0] != 'O' {
+	switch {
+	case plyParts[1] == "" && ply[0] != 'O':
 		b.movePawn(plyParts, color)
-	} else if plyParts[1] == "N" {
+	case plyParts[1] == "N":
 		b.moveKnight(plyParts, color)
+	case plyParts[1] == "B":
+		b.moveBishop(plyParts, color)
+	case plyParts[1] == "K" || ply[0] == 'O':
+		b.moveKing(plyParts, color)
+	default:
 	}
 }
 
@@ -623,7 +737,8 @@ func (b *Board) setUp() {
 	for color := range allPieces {
 		for _, piece := range allPieces[color] {
 			piece.curType = piece.initType // for pawns
-			b.setPieceOnSquare(piece, piece.initSquare)
+			piece.curSquare = piece.initSquare
+			piece.curSquare.piece = piece
 		}
 	}
 }

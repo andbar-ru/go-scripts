@@ -855,6 +855,13 @@ func (b *Board) move(ply string, color uint8) {
 
 // setUp sets up all pieces before game starts.
 func (b *Board) setUp() {
+	// Clear the board
+	for file := range b.squares {
+		for _, square := range b.squares[file] {
+			square.piece = nil
+		}
+	}
+
 	for color := range allPieces {
 		for _, piece := range allPieces[color] {
 			piece.curType = piece.initType // for pawns
@@ -994,7 +1001,7 @@ func main() {
 	}
 
 	for _, filepath := range filepaths {
-		fmt.Println(filepath, ":")
+		fmt.Printf("%s: ", filepath)
 		f, err := os.Open(filepath)
 		check(err)
 		defer f.Close()
@@ -1013,6 +1020,9 @@ func main() {
 						fmt.Println(board)
 						panic(err)
 					}
+					fmt.Println("OK")
+				} else {
+					fmt.Println()
 				}
 			}
 		}

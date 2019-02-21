@@ -26,6 +26,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -962,24 +963,56 @@ func init() {
 }
 
 func main() {
-	filepath := os.Args[1]
-	f, err := os.Open(filepath)
+	arg := os.Args[1]
+	fileinfo, err := os.Stat(arg)
 	check(err)
-	defer f.Close()
+	mode := fileinfo.Mode()
 
-	parser := newPgnParser(f)
-	for parser.hasNextGame() {
-		game, err := parser.nextGame()
+	filepaths := make([]string, 0)
+
+	if mode.IsRegular() && path.Ext(fileinfo.Name()) == ".pgn" {
+		filepaths = append(filepaths, arg)
+	} else if mode.IsDir() {
+		dir, err := os.Open(arg)
 		check(err)
-		if game != nil {
-			board.setUp()
-			game.play()
-			if iccfRegex.MatchString(filepath) {
-				gameId := iccfRegex.FindStringSubmatch(filepath)[1]
-				err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
-				if err != nil {
-					fmt.Println(board)
-					panic(err)
+		defer dir.Close()
+
+		fileinfos, err := dir.Readdir(0)
+		check(err)
+		for _, fileinfo := range fileinfos {
+			if fileinfo.Mode().IsRegular() && path.Ext(fileinfo.Name()) == ".pgn" {
+				filepaths = append(filepaths, path.Join(arg, fileinfo.Name()))
+			}
+		}
+	} else {
+		fmt.Println("Argument is of unknown mode")
+	}
+
+	if len(filepaths) == 0 {
+		fmt.Println("There are nothing to process")
+		return
+	}
+
+	for _, filepath := range filepaths {
+		fmt.Println(filepath, ":")
+		f, err := os.Open(filepath)
+		check(err)
+		defer f.Close()
+
+		parser := newPgnParser(f)
+		for parser.hasNextGame() {
+			game, err := parser.nextGame()
+			check(err)
+			if game != nil {
+				board.setUp()
+				game.play()
+				if iccfRegex.MatchString(filepath) {
+					gameId := iccfRegex.FindStringSubmatch(filepath)[1]
+					err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
+					if err != nil {
+						fmt.Println(board)
+						panic(err)
+					}
 				}
 			}
 		}

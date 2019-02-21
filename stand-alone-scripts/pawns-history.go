@@ -24,12 +24,13 @@ import (
 	"fmt"
 	"io"
 	"math"
-	// "net/http"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
-	// "github.com/PuerkitoBio/goquery"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 const (
@@ -58,6 +59,8 @@ var (
 	plyRegex           = regexp.MustCompile(`^([NBRQK])?([a-h1-8])?(x)?([a-h][1-8]|O-O(?:-O)?)(=[NBRQ])?(?:[+#])?$`)
 	isPawnPlyRegex     = regexp.MustCompile(`^[a-h]`)
 	isEnPassantRegex   = regexp.MustCompile(`^[a-h]x[a-h][36](?:[+#])?$`)
+	squareRegex        = regexp.MustCompile(`^[a-h][1-8]$`)
+	squareClassRegex   = regexp.MustCompile(`^cb-([bw][pnbrqk])?[bw]$`)
 
 	byteFileOrRankMap = map[byte]uint8{
 		'a': 1,
@@ -312,20 +315,10 @@ func pickPiece(pieces []*Piece, plyParts []string) (*Piece, error) {
 	return foundPiece, nil
 }
 
-// validateFinalPosition compares pawns final position with final position of the game on url.
+// validateFinalPosition compares final position with final position of this game on iccf.com.
 // If they are not the same, returns error.
 // It is suitable only for ICCF games.
-/*
 func validateFinalPosition(url string) error {
-	var survivedPawns [2][]*Pawn
-	for color := range pawns {
-		for _, pawn := range pawns[color] {
-			if pawn.promotion == noPromotion && pawn.square != (Square{}) {
-				survivedPawns[color] = append(survivedPawns[color], pawn)
-			}
-		}
-	}
-
 	response, err := http.Get(url)
 	check(err)
 	defer response.Body.Close()
@@ -337,21 +330,51 @@ func validateFinalPosition(url string) error {
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	check(err)
 
-	var squaresWithPawn [2]*goquery.Selection
-	squaresWithPawn[white] = doc.Find(".cb-wpw")
-	squaresWithPawn[white] = squaresWithPawn[white].Add(".cb-wpb")
-	squaresWithPawn[black] = doc.Find(".cb-bpw")
-	squaresWithPawn[black] = squaresWithPawn[black].Add(".cb-bpb")
+	chessboard := doc.Find(".chessboard").First()
+	squares := chessboard.ChildrenFiltered("[name]")
+	if squares.Length() != 64 {
+		return fmt.Errorf("Number of squares is not 64 (%d)", squares.Length())
+	}
+	var errSquares []string
 
-	for color := range survivedPawns {
-		if len(survivedPawns[color]) != squaresWithPawn[color].Length() {
-			return fmt.Errorf("Number of surviving %s pawns does not match: %d != %d", colorStringMap[uint8(color)], len(survivedPawns[color]), squaresWithPawn[color].Length())
+	squares.Each(func(i int, span *goquery.Selection) {
+		name, _ := span.Attr("name")
+		if !squareRegex.MatchString(name) {
+			panic(fmt.Sprintf("Unexpected square name %q", name))
 		}
+		class, _ := span.Attr("class")
+		if !squareClassRegex.MatchString(class) {
+			panic(fmt.Sprintf("Unexpected square class %q", class))
+		}
+		file := byteFileOrRankMap[name[0]]
+		rank := byteFileOrRankMap[name[1]]
+		square, err := board.getSquare(file, rank)
+		check(err)
+
+		// Assemble the expected class
+		var squareColor, squarePiece, squarePieceColor string
+		if file&1 == rank&1 {
+			squareColor = "b"
+		} else {
+			squareColor = "w"
+		}
+		if piece := square.piece; piece != nil {
+			squarePiece = pieceSymbolMap[piece.curType]
+			squarePieceColor = string(colorStringMap[piece.color][0])
+		}
+		expectedClass := fmt.Sprintf("cb-%s%s%s", squarePieceColor, squarePiece, squareColor)
+
+		if class != expectedClass {
+			errSquares = append(errSquares, name)
+		}
+	})
+
+	if len(errSquares) > 0 {
+		return fmt.Errorf("Mismatched squares: %s", strings.Join(errSquares, ","))
 	}
 
 	return nil
 }
-*/
 
 func (s *Stats) String() string {
 	var output string
@@ -866,8 +889,6 @@ func (g *Game) play() {
 				gamePlies++
 
 				board.move(ply, uint8(color))
-				fmt.Println(ply)
-				fmt.Println(board)
 
 				if isPawnPlyRegex.MatchString(ply) {
 					stats.pawnPlies++
@@ -953,11 +974,14 @@ func main() {
 		if game != nil {
 			board.setUp()
 			game.play()
-			// if iccfRegex.MatchString(filepath) {
-			// 	gameId := iccfRegex.FindStringSubmatch(filepath)[1]
-			// 	err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
-			// check(err)
-			// }
+			if iccfRegex.MatchString(filepath) {
+				gameId := iccfRegex.FindStringSubmatch(filepath)[1]
+				err = validateFinalPosition("https://www.iccf.com/game?id=" + gameId)
+				if err != nil {
+					fmt.Println(board)
+					panic(err)
+				}
+			}
 		}
 	}
 

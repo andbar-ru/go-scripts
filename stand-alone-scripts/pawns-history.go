@@ -2,20 +2,20 @@
 Objectives:
 * Parse pgn files given in command line arguments. +
 * Determine which moves are pawn moves. +
-* Determine which moves capture a pawn.
+* Determine which moves capture a pawn. +
 * Statistics:
   - average fraction of pawn moves of all moves; +
   - correlation between fraction of pawn moves and number of moves in a game; +
-  - average chances to survive for all pawns and for each pawn individually;
-  - average chance to promote for all pawns and for each pawn individually;
-  - chances to survive if pawn moves first;
-  - chances to survive if pawn moves last or doesn't move;
-  - balance of kills and deaths for all pawns and for each pawn individually;
-  - average number of moves for each pawn;
+  - average chances of survival for all pawns, for pawns of each color and for each pawn individually in a game;
+  - average chances to promote for all pawns, for pawns of each color and for each pawn individually in a game;
+  - chances of survival if pawn moves first;
+  - chances of survival if pawn moves last or doesn't move;
+  - balance of kills and deaths for all pawns, for pawns of each color and for each pawn individually;
+  - average number of moves for each pawn in a game;
   - how many moves for one death for each pawn;
   - correlation between captures and survival rate;
 
-For iccf games check that final position is right comparing with position on www.iccf.com.
+For iccf games check that final position is right comparing with position on www.iccf.com. +
 */
 package main
 
@@ -40,8 +40,7 @@ const (
 )
 
 const (
-	noPiece = iota
-	pawn
+	pawn = iota
 	knight
 	bishop
 	rook
@@ -60,6 +59,7 @@ var (
 	plyRegex           = regexp.MustCompile(`^([NBRQK])?([a-h1-8])?(x)?([a-h][1-8]|O-O(?:-O)?)(=[NBRQ])?(?:[+#])?$`)
 	isPawnPlyRegex     = regexp.MustCompile(`^[a-h]`)
 	isEnPassantRegex   = regexp.MustCompile(`^[a-h]x[a-h][36](?:[+#])?$`)
+	isCaptureRegex     = regexp.MustCompile(`x`)
 	squareRegex        = regexp.MustCompile(`^[a-h][1-8]$`)
 	squareClassRegex   = regexp.MustCompile(`^cb-([bw][pnbrqk])?[bw]$`)
 
@@ -129,6 +129,7 @@ type Stats struct {
 	pawnPlies         int
 	gamePliesList     []int
 	gamePawnPliesList []int
+	captureCount      int
 }
 
 type PgnParser struct {
@@ -167,6 +168,7 @@ type Game struct {
 
 func check(err error) {
 	if err != nil {
+		fmt.Println(board)
 		panic(err)
 	}
 }
@@ -285,7 +287,25 @@ func pickPiece(pieces []*Piece, plyParts []string) (*Piece, error) {
 	}
 	// len(pieces) > 1
 	if plyParts[2] == "" {
-		return nil, fmt.Errorf("There are multiple pieces to pick from but there are no extra info about source square. Ply %s", plyParts[0])
+		// One piece can move, others do not, because of check to own king.
+		piecesAble := make([]*Piece, 0, 1)
+		destSquare, err := board.getSquareString(plyParts[4])
+		check(err)
+		for _, piece := range pieces {
+			srcSquare := piece.curSquare
+			board.movePieceOnSquare(piece, destSquare, true) // test move
+			result := board.kingInCheck(piece.color)
+			if !result {
+				piecesAble = append(piecesAble, piece)
+			}
+			board.movePieceOnSquare(piece, srcSquare, true) // roll back move
+		}
+		if len(piecesAble) == 0 {
+			return nil, fmt.Errorf("There are no pieces to pick from. Ply %s", plyParts[0])
+		} else if len(piecesAble) > 1 {
+			return nil, fmt.Errorf("There are multiple pieces to pick from but there are no extra info about source square. Ply %s", plyParts[0])
+		}
+		return piecesAble[0], nil
 	}
 	source := plyParts[2][0]
 	var foundPiece *Piece
@@ -375,6 +395,23 @@ func validateFinalPosition(url string) error {
 	}
 
 	return nil
+}
+
+func validateStats() {
+	// Total captureCount is equal to sum of capturedCount and sum of captureCount of all pieces.
+	var capturedSum, captureSum int
+	for color := range allPieces {
+		for _, piece := range allPieces[color] {
+			capturedSum += piece.capturedCount
+			captureSum += piece.captureCount
+		}
+	}
+	if stats.captureCount != capturedSum {
+		panic(fmt.Sprintf("Total captureCount is not equal to sum of capturedCount of all pieces: %d != %d", stats.captureCount, capturedSum))
+	}
+	if stats.captureCount != captureSum {
+		panic(fmt.Sprintf("Total captureCount is not equal to sum of captureCount of all pieces: %d != %d", stats.captureCount, captureSum))
+	}
 }
 
 func (s *Stats) String() string {
@@ -493,7 +530,7 @@ func (b *Board) getSquareString(str string) (*Square, error) {
 	return b.getSquare(file, rank)
 }
 
-func (b *Board) movePieceOnSquare(piece *Piece, square *Square) {
+func (b *Board) movePieceOnSquare(piece *Piece, square *Square, test bool) {
 	if piece.curSquare != nil {
 		piece.curSquare.piece = nil
 	}
@@ -502,7 +539,9 @@ func (b *Board) movePieceOnSquare(piece *Piece, square *Square) {
 	}
 	square.piece = piece
 	piece.curSquare = square
-	piece.moveCount++
+	if !test {
+		piece.moveCount++
+	}
 }
 
 // capture removes captured piece from the board.
@@ -583,9 +622,9 @@ func (b *Board) movePawn(plyParts []string, color uint8) {
 	}
 
 	if plyParts[3] == "x" {
-		piece.capturedCount++
+		piece.captureCount++
 	}
-	b.movePieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square, false)
 }
 
 func (b *Board) moveKnight(plyParts []string, color uint8) {
@@ -616,9 +655,9 @@ func (b *Board) moveKnight(plyParts []string, color uint8) {
 	check(err)
 
 	if plyParts[3] == "x" {
-		piece.capturedCount++
+		piece.captureCount++
 	}
-	b.movePieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square, false)
 }
 
 func (b *Board) moveBishop(plyParts []string, color uint8) {
@@ -654,9 +693,9 @@ func (b *Board) moveBishop(plyParts []string, color uint8) {
 	check(err)
 
 	if plyParts[3] == "x" {
-		piece.capturedCount++
+		piece.captureCount++
 	}
-	b.movePieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square, false)
 }
 
 func (b *Board) moveRook(plyParts []string, color uint8) {
@@ -708,9 +747,9 @@ func (b *Board) moveRook(plyParts []string, color uint8) {
 	check(err)
 
 	if plyParts[3] == "x" {
-		piece.capturedCount++
+		piece.captureCount++
 	}
-	b.movePieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square, false)
 }
 
 func (b *Board) moveQueen(plyParts []string, color uint8) {
@@ -749,9 +788,9 @@ func (b *Board) moveQueen(plyParts []string, color uint8) {
 	check(err)
 
 	if plyParts[3] == "x" {
-		piece.capturedCount++
+		piece.captureCount++
 	}
-	b.movePieceOnSquare(piece, square)
+	b.movePieceOnSquare(piece, square, false)
 }
 
 func (b *Board) moveKing(plyParts []string, color uint8) {
@@ -787,8 +826,8 @@ func (b *Board) moveKing(plyParts []string, color uint8) {
 		kingDestSquare, _ := b.getSquare(kingDestFile, rank)
 		rookDestSquare, _ := b.getSquare(rookDestFile, rank)
 
-		b.movePieceOnSquare(kingPiece, kingDestSquare)
-		b.movePieceOnSquare(rookPiece, rookDestSquare)
+		b.movePieceOnSquare(kingPiece, kingDestSquare, false)
+		b.movePieceOnSquare(rookPiece, rookDestSquare, false)
 	} else {
 		square, err := b.getSquareString(plyParts[4])
 		check(err)
@@ -818,9 +857,9 @@ func (b *Board) moveKing(plyParts []string, color uint8) {
 		check(err)
 
 		if plyParts[3] == "x" {
-			piece.capturedCount++
+			piece.captureCount++
 		}
-		b.movePieceOnSquare(piece, square)
+		b.movePieceOnSquare(piece, square, false)
 	}
 }
 
@@ -851,6 +890,47 @@ func (b *Board) move(ply string, color uint8) {
 		b.moveKing(plyParts, color)
 	default:
 	}
+}
+
+// kingInCheck determines if the king of given color is in check by opponents' bishop, rook or queen.
+func (b *Board) kingInCheck(color uint8) bool {
+	piece := allPieces[color][15]
+	if piece.curType != king {
+		panic(fmt.Sprintf("Piece is not a king, just %s", pieceStringMap[piece.curType]))
+	}
+
+	square := piece.curSquare
+	factors := [3]int{-1, 0, 1}
+	for _, f1 := range factors {
+		for _, f2 := range factors {
+			step := 1
+			for {
+				file := uint8(int(square.file) + step*f1)
+				rank := uint8(int(square.rank) + step*f2)
+				srcSquare, err := b.getSquare(file, rank)
+				if err != nil {
+					break
+				}
+				piece := srcSquare.piece
+				if piece != nil {
+					if piece.color == color^1 {
+						if f1 != 0 && f2 != 0 { // diagonal
+							if piece.curType == bishop || piece.curType == queen {
+								return true
+							}
+						} else { // file or rank
+							if piece.curType == rook || piece.curType == queen {
+								return true
+							}
+						}
+					}
+					break
+				}
+				step++
+			}
+		}
+	}
+	return false
 }
 
 // setUp sets up all pieces before game starts.
@@ -901,6 +981,9 @@ func (g *Game) play() {
 				if isPawnPlyRegex.MatchString(ply) {
 					stats.pawnPlies++
 					gamePawnPlies++
+				}
+				if isCaptureRegex.MatchString(ply) {
+					stats.captureCount++
 				}
 			}
 		}
@@ -1001,7 +1084,6 @@ func main() {
 	}
 
 	for _, filepath := range filepaths {
-		fmt.Printf("%s: ", filepath)
 		f, err := os.Open(filepath)
 		check(err)
 		defer f.Close()
@@ -1020,13 +1102,11 @@ func main() {
 						fmt.Println(board)
 						panic(err)
 					}
-					fmt.Println("OK")
-				} else {
-					fmt.Println()
 				}
 			}
 		}
 	}
 
+	validateStats()
 	fmt.Println(stats)
 }

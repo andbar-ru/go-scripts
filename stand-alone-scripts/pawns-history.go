@@ -15,7 +15,7 @@ Objectives:
   - how many moves for one death for each pawn;
   - correlation between captures and survival rate;
 
-For iccf games check that final position is right comparing with position on www.iccf.com. +
+For iccf games validate that final position comparing it with position on www.iccf.com. +
 */
 package main
 
@@ -421,6 +421,14 @@ func (s *Stats) String() string {
 	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
 	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
 	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.4f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
+	pawnSurvivalTotal, pawnSurvivalColor, pawnSurvivals := s.getPawnSurvivalStats()
+	output += fmt.Sprintf("Total pawn chances of survival: %.2f %%, white: %.2f %%, black: %.2f %%\n", pawnSurvivalTotal*100.0, pawnSurvivalColor[0]*100.0, pawnSurvivalColor[1]*100.0)
+	output += "Individually:\n"
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			output += fmt.Sprintf("  %s: %.2f %%\n", piece.initSquare, pawnSurvivals[piece]*100.0)
+		}
+	}
 
 	return output
 }
@@ -437,6 +445,25 @@ func (s *Stats) getCorrelationBetweenPawnFractionAndGamePlies() float64 {
 	correlation, err := getCorrelation(plies, fractions)
 	check(err)
 	return correlation
+}
+
+func (s *Stats) getPawnSurvivalStats() (pawnSurvivalTotal float64, pawnSurvivalColor [2]float64, pawnSurvivals map[*Piece]float64) {
+	var pawnSurvivalTotalSum int
+	var pawnSurvivalColorSums [2]int
+	pawnSurvivals = make(map[*Piece]float64)
+
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			pawnSurvivalTotalSum += s.games - piece.capturedCount
+			pawnSurvivalColorSums[color] += s.games - piece.capturedCount
+			pawnSurvivals[piece] = float64(s.games-piece.capturedCount) / float64(s.games)
+		}
+	}
+	pawnSurvivalTotal = float64(pawnSurvivalTotalSum) / float64(s.games*16)
+	for color, sum := range pawnSurvivalColorSums {
+		pawnSurvivalColor[color] = float64(sum) / float64(s.games*8)
+	}
+	return
 }
 
 func (parser *PgnParser) hasNextGame() bool {

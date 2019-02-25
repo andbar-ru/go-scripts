@@ -6,8 +6,8 @@ Objectives:
 * Statistics:
   - average fraction of pawn moves of all moves; +
   - correlation between fraction of pawn moves and number of moves in a game; +
-  - average chances of survival for all pawns, for pawns of each color and for each pawn individually in a game;
-  - average chances to promote for all pawns, for pawns of each color and for each pawn individually in a game;
+  - average chances of survival for all pawns, for pawns of each color and for each pawn individually in a game; +
+  - average chances to promote for all pawns, for pawns of each color and for each pawn individually in a game; +
   - chances of survival if pawn moves first;
   - chances of survival if pawn moves last or doesn't move;
   - balance of kills and deaths for all pawns, for pawns of each color and for each pawn individually;
@@ -421,12 +421,22 @@ func (s *Stats) String() string {
 	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
 	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
 	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.4f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
+
 	pawnSurvivalTotal, pawnSurvivalColor, pawnSurvivals := s.getPawnSurvivalStats()
 	output += fmt.Sprintf("Total pawn chances of survival: %.2f %%, white: %.2f %%, black: %.2f %%\n", pawnSurvivalTotal*100.0, pawnSurvivalColor[0]*100.0, pawnSurvivalColor[1]*100.0)
 	output += "Individually:\n"
 	for color := range allPieces {
 		for _, piece := range allPieces[color][:8] {
 			output += fmt.Sprintf("  %s: %.2f %%\n", piece.initSquare, pawnSurvivals[piece]*100.0)
+		}
+	}
+
+	pawnPromotionTotal, pawnPromotionColor, pawnPromotions := s.getPawnPromotionStats()
+	output += fmt.Sprintf("Total pawn chances of promotion: %.2f %%, white: %.2f %%, black: %.2f %%\n", pawnPromotionTotal*100.0, pawnPromotionColor[0]*100.0, pawnPromotionColor[1]*100.0)
+	output += "Individually:\n"
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			output += fmt.Sprintf("  %s: %.2f %%\n", piece.initSquare, pawnPromotions[piece]*100.0)
 		}
 	}
 
@@ -462,6 +472,25 @@ func (s *Stats) getPawnSurvivalStats() (pawnSurvivalTotal float64, pawnSurvivalC
 	pawnSurvivalTotal = float64(pawnSurvivalTotalSum) / float64(s.games*16)
 	for color, sum := range pawnSurvivalColorSums {
 		pawnSurvivalColor[color] = float64(sum) / float64(s.games*8)
+	}
+	return
+}
+
+func (s *Stats) getPawnPromotionStats() (pawnPromotionTotal float64, pawnPromotionColor [2]float64, pawnPromotions map[*Piece]float64) {
+	var pawnPromotionTotalSum int
+	var pawnPromotionColorSums [2]int
+	pawnPromotions = make(map[*Piece]float64)
+
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			pawnPromotionTotalSum += piece.promotionCount
+			pawnPromotionColorSums[color] += piece.promotionCount
+			pawnPromotions[piece] = float64(piece.promotionCount) / float64(s.games)
+		}
+	}
+	pawnPromotionTotal = float64(pawnPromotionTotalSum) / float64(s.games*16)
+	for color, sum := range pawnPromotionColorSums {
+		pawnPromotionColor[color] = float64(sum) / float64(s.games*8)
 	}
 	return
 }

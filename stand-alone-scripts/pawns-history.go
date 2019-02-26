@@ -8,8 +8,10 @@ Objectives:
   - correlation between fraction of pawn moves and number of moves in a game; +
   - average chances of survival for all pawns, for pawns of each color and for each pawn individually in a game; +
   - average chances to promote for all pawns, for pawns of each color and for each pawn individually in a game; +
-  - chances of survival if pawn moves first;
-  - chances of survival if pawn moves last or doesn't move;
+  - chances of survival if pawn moves;
+  - chances of survival if pawn doesn't move;
+  - chances of survival if pawn moves first; +
+  - chances of survival if pawn moves last;
   - balance of kills and deaths for all pawns, for pawns of each color and for each pawn individually;
   - average number of moves for each pawn in a game;
   - how many moves for one death for each pawn;
@@ -124,12 +126,14 @@ var (
 )
 
 type Stats struct {
-	games             int
-	allPlies          int
-	pawnPlies         int
-	gamePliesList     []int
-	gamePawnPliesList []int
-	captureCount      int
+	games                                    int
+	allPlies                                 int
+	pawnPlies                                int
+	gamePliesList                            []int
+	gamePawnPliesList                        []int
+	captureCount                             int
+	pawnMovedFirstAndSurvivedCount           [2]int
+	pawnMovedLastOrDidntMoveAndSurvivedCount [2]int
 }
 
 type PgnParser struct {
@@ -145,7 +149,8 @@ type Square struct {
 }
 
 type Board struct {
-	squares [8][8]*Square
+	squares          [8][8]*Square
+	pawnsMovedInGame [2]map[*Piece]bool
 }
 
 type Piece struct {
@@ -158,6 +163,9 @@ type Piece struct {
 	captureCount   int
 	capturedCount  int // always 0 for kings
 	promotionCount int // only for pawns
+	// game stats
+	movedFirst           bool
+	movedLastOrDidntMove bool
 }
 
 type Move [2]string
@@ -412,6 +420,15 @@ func validateStats() {
 	if stats.captureCount != captureSum {
 		panic(fmt.Sprintf("Total captureCount is not equal to sum of captureCount of all pieces: %d != %d", stats.captureCount, captureSum))
 	}
+
+	// Pawn moved first
+	if stats.pawnMovedFirstAndSurvivedCount[0] != stats.games*2 {
+		panic(fmt.Sprintf("Pawn moved first count is not double of games: %d != %d * 2", stats.pawnMovedFirstAndSurvivedCount[0], stats.games))
+	}
+	// Pawn moved last or didn't move
+	if stats.pawnMovedLastOrDidntMoveAndSurvivedCount[0] < stats.games*2 {
+		panic(fmt.Sprintf("Pawn moved last or didn't move count must not be less than double of games: %d < %d * 2", stats.pawnMovedLastOrDidntMoveAndSurvivedCount[0], stats.games))
+	}
 }
 
 func (s *Stats) String() string {
@@ -439,6 +456,9 @@ func (s *Stats) String() string {
 			output += fmt.Sprintf("  %s: %.2f %%\n", piece.initSquare, pawnPromotions[piece]*100.0)
 		}
 	}
+
+	output += fmt.Sprintf("Chances of survival if pawn moves first: %d of %d = %.2f %%\n", s.pawnMovedFirstAndSurvivedCount[1], s.pawnMovedFirstAndSurvivedCount[0], float64(s.pawnMovedFirstAndSurvivedCount[1])/float64(s.pawnMovedFirstAndSurvivedCount[0])*100.0)
+	output += fmt.Sprintf("Chances of survival if pawn moves last or doesn't move: %d of %d = %.2f %%\n", s.pawnMovedLastOrDidntMoveAndSurvivedCount[1], s.pawnMovedLastOrDidntMoveAndSurvivedCount[0], float64(s.pawnMovedLastOrDidntMoveAndSurvivedCount[1])/float64(s.pawnMovedLastOrDidntMoveAndSurvivedCount[0])*100.0)
 
 	return output
 }
@@ -681,6 +701,15 @@ func (b *Board) movePawn(plyParts []string, color uint8) {
 		piece.captureCount++
 	}
 	b.movePieceOnSquare(piece, square, false)
+
+	// More pawn specific stats
+	if len(b.pawnsMovedInGame[color]) == 0 {
+		piece.movedFirst = true
+	}
+	if len(b.pawnsMovedInGame[color]) < 8 {
+		piece.movedLastOrDidntMove = false
+	}
+	b.pawnsMovedInGame[color][piece] = true
 }
 
 func (b *Board) moveKnight(plyParts []string, color uint8) {
@@ -997,10 +1026,17 @@ func (b *Board) setUp() {
 			square.piece = nil
 		}
 	}
+	for color := range b.pawnsMovedInGame {
+		b.pawnsMovedInGame[color] = make(map[*Piece]bool)
+	}
 
 	for color := range allPieces {
 		for _, piece := range allPieces[color] {
-			piece.curType = piece.initType // for pawns
+			// for pawns
+			piece.curType = piece.initType
+			piece.movedFirst = false
+			piece.movedLastOrDidntMove = true
+
 			piece.curSquare = piece.initSquare
 			piece.curSquare.piece = piece
 		}
@@ -1046,6 +1082,35 @@ func (g *Game) play() {
 	}
 	stats.gamePliesList = append(stats.gamePliesList, gamePlies)
 	stats.gamePawnPliesList = append(stats.gamePawnPliesList, gamePawnPlies)
+
+	var movedFirst, movedLastOrDidntMove bool
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			if piece.initType != pawn {
+				panic(fmt.Sprintf("Piece is not a pawn, just %s", pieceStringMap[piece.initType]))
+			}
+			if piece.movedFirst {
+				stats.pawnMovedFirstAndSurvivedCount[0]++
+				if piece.curSquare != nil {
+					stats.pawnMovedFirstAndSurvivedCount[1]++
+				}
+				movedFirst = true
+			}
+			if piece.movedLastOrDidntMove {
+				stats.pawnMovedLastOrDidntMoveAndSurvivedCount[0]++
+				if piece.curSquare != nil {
+					stats.pawnMovedLastOrDidntMoveAndSurvivedCount[1]++
+				}
+				movedLastOrDidntMove = true
+			}
+		}
+	}
+	if movedFirst == false {
+		panic(fmt.Sprintf("This game has not first pawn moves: %s", g.moves))
+	}
+	if movedLastOrDidntMove == false {
+		panic(fmt.Sprintf("This game has not last pawn moves or pawns without moves: %s", g.moves))
+	}
 }
 
 func init() {

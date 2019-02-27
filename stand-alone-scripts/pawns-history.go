@@ -15,7 +15,7 @@ Objectives:
   - kills to deaths ratio for all pawns, for pawns of each color and for each pawn individually; +
   - average number of moves for each pawn in a game; +
   - how many moves for one death for each pawn; +
-  - correlation between captures and survival rate;
+  - correlation between captures and survival rate; +
 
 For iccf games validate that final position comparing it with position on www.iccf.com. +
 */
@@ -446,7 +446,7 @@ func (s *Stats) String() string {
 	output += fmt.Sprintf("Games: %d\n", s.games)
 	output += fmt.Sprintf("All plies: %d\n", s.allPlies)
 	output += fmt.Sprintf("Pawn plies: %d (%.1f %%)\n", s.pawnPlies, getPercent(float64(s.pawnPlies), float64(s.allPlies)))
-	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.4f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
+	output += fmt.Sprintf("Correlation between fraction of pawn moves and number of moves in a game: %.2f\n", s.getCorrelationBetweenPawnFractionAndGamePlies())
 
 	pawnSurvivalTotal, pawnSurvivalColor, pawnSurvivals := s.getPawnSurvivalStats()
 	output += fmt.Sprintf("Total pawn chances of survival: %.2f %%, white: %.2f %%, black: %.2f %%\n", pawnSurvivalTotal*100.0, pawnSurvivalColor[0]*100.0, pawnSurvivalColor[1]*100.0)
@@ -494,6 +494,8 @@ func (s *Stats) String() string {
 		}
 	}
 
+	output += fmt.Sprintf("Correlation between captures and survival rate for pawns: %.2f\n", s.getCorrelationBetweenCapturesAndSurvivalRate())
+
 	return output
 }
 
@@ -507,6 +509,20 @@ func (s *Stats) getCorrelationBetweenPawnFractionAndGamePlies() float64 {
 		fractions[i] = float64(v) / plies[i]
 	}
 	correlation, err := getCorrelation(plies, fractions)
+	check(err)
+	return correlation
+}
+
+func (s *Stats) getCorrelationBetweenCapturesAndSurvivalRate() float64 {
+	captureCounts := make([]float64, 16)
+	survivalRates := make([]float64, 16)
+	for color := range allPieces {
+		for file, piece := range allPieces[color][:8] {
+			captureCounts[8*color+file] = float64(piece.captureCount)
+			survivalRates[8*color+file] = 1.0 - float64(piece.capturedCount)/float64(s.games)
+		}
+	}
+	correlation, err := getCorrelation(captureCounts, survivalRates)
 	check(err)
 	return correlation
 }

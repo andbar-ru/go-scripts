@@ -13,8 +13,8 @@ Objectives:
   - chances of survival if pawn moves first; +
   - chances of survival if pawn moves last; +
   - kills to deaths ratio for all pawns, for pawns of each color and for each pawn individually; +
-  - average number of moves for each pawn in a game;
-  - how many moves for one death for each pawn;
+  - average number of moves for each pawn in a game; +
+  - how many moves for one death for each pawn; +
   - correlation between captures and survival rate;
 
 For iccf games validate that final position comparing it with position on www.iccf.com. +
@@ -477,6 +477,20 @@ func (s *Stats) String() string {
 	for color := range allPieces {
 		for _, piece := range allPieces[color][:8] {
 			output += fmt.Sprintf("  %s: %.2f\n", piece.initSquare, killDeathRatios[piece])
+		}
+	}
+
+	output += "Average number of moves for each pawn in a game:\n"
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			output += fmt.Sprintf("  %s: %.2f\n", piece.initSquare, float64(piece.moveCount)/float64(s.games))
+		}
+	}
+
+	output += "Average number of moves for one death for each pawn:\n"
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			output += fmt.Sprintf("  %s: %.2f\n", piece.initSquare, float64(piece.moveCount)/float64(piece.capturedCount))
 		}
 	}
 

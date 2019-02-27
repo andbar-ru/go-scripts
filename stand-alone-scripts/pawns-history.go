@@ -12,7 +12,7 @@ Objectives:
   - chances of survival if pawn doesn't move; +
   - chances of survival if pawn moves first; +
   - chances of survival if pawn moves last; +
-  - balance of kills and deaths for all pawns, for pawns of each color and for each pawn individually;
+  - kills to deaths ratio for all pawns, for pawns of each color and for each pawn individually; +
   - average number of moves for each pawn in a game;
   - how many moves for one death for each pawn;
   - correlation between captures and survival rate;
@@ -426,6 +426,10 @@ func validateStats() {
 		panic(fmt.Sprintf("Total captureCount is not equal to sum of captureCount of all pieces: %d != %d", stats.captureCount, captureSum))
 	}
 
+	// Pawn moved
+	if stats.pawnMovedAndSurvivedCount[0]+stats.pawnNotMovedAndSurvivedCount[0] != stats.games*16 {
+		panic(fmt.Sprintf("Sum of moved and not moved pawns is not 16 * number of games: %d != %d * 16", stats.pawnMovedAndSurvivedCount[0]+stats.pawnNotMovedAndSurvivedCount[0], stats.games))
+	}
 	// Pawn moved first
 	if stats.pawnMovedFirstAndSurvivedCount[0] != stats.games*2 {
 		panic(fmt.Sprintf("Pawn moved first count is not double of games: %d != %d * 2", stats.pawnMovedFirstAndSurvivedCount[0], stats.games))
@@ -466,6 +470,15 @@ func (s *Stats) String() string {
 	output += fmt.Sprintf("Chances of survival if pawn doesn't move: %d of %d = %.2f %%\n", s.pawnNotMovedAndSurvivedCount[1], s.pawnNotMovedAndSurvivedCount[0], float64(s.pawnNotMovedAndSurvivedCount[1])/float64(s.pawnNotMovedAndSurvivedCount[0])*100.0)
 	output += fmt.Sprintf("Chances of survival if pawn moves first: %d of %d = %.2f %%\n", s.pawnMovedFirstAndSurvivedCount[1], s.pawnMovedFirstAndSurvivedCount[0], float64(s.pawnMovedFirstAndSurvivedCount[1])/float64(s.pawnMovedFirstAndSurvivedCount[0])*100.0)
 	output += fmt.Sprintf("Chances of survival if pawn moves last: %d of %d = %.2f %%\n", s.pawnMovedLastAndSurvivedCount[1], s.pawnMovedLastAndSurvivedCount[0], float64(s.pawnMovedLastAndSurvivedCount[1])/float64(s.pawnMovedLastAndSurvivedCount[0])*100.0)
+
+	killDeathRatioTotal, killDeathRatioColor, killDeathRatios := s.getKillDeathRatioStats()
+	output += fmt.Sprintf("Total kills to deaths ratio: %.2f, white: %.2f, black: %.2f\n", killDeathRatioTotal, killDeathRatioColor[0], killDeathRatioColor[1])
+	output += "Individually:\n"
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			output += fmt.Sprintf("  %s: %.2f\n", piece.initSquare, killDeathRatios[piece])
+		}
+	}
 
 	return output
 }
@@ -518,6 +531,27 @@ func (s *Stats) getPawnPromotionStats() (pawnPromotionTotal float64, pawnPromoti
 	pawnPromotionTotal = float64(pawnPromotionTotalSum) / float64(s.games*16)
 	for color, sum := range pawnPromotionColorSums {
 		pawnPromotionColor[color] = float64(sum) / float64(s.games*8)
+	}
+	return
+}
+
+func (s *Stats) getKillDeathRatioStats() (killDeathRatioTotal float64, killDeathRatioColor [2]float64, killDeathRatios map[*Piece]float64) {
+	var killTotalSum, deathTotalSum int
+	var killColorSums, deathColorSums [2]int
+	killDeathRatios = make(map[*Piece]float64)
+
+	for color := range allPieces {
+		for _, piece := range allPieces[color][:8] {
+			killTotalSum += piece.captureCount
+			deathTotalSum += piece.capturedCount
+			killColorSums[color] += piece.captureCount
+			deathColorSums[color] += piece.capturedCount
+			killDeathRatios[piece] = float64(piece.captureCount) / float64(piece.capturedCount)
+		}
+	}
+	killDeathRatioTotal = float64(killTotalSum) / float64(deathTotalSum)
+	for color := range killColorSums {
+		killDeathRatioColor[color] = float64(killColorSums[color]) / float64(deathColorSums[color])
 	}
 	return
 }

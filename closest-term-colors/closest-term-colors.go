@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
+
+	"github.com/andbar-ru/closest_colors"
 )
 
 const (
@@ -37,14 +37,9 @@ type rgb struct {
 
 type color struct {
 	Id   int    `json:"colorId"`
-	RGB  rgb    `json:"rgb"`
+	Rgb  rgb    `json:"rgb"`
 	Hex  string `json:"hexString"`
 	Name string `json:"name"`
-}
-
-type colorDistance struct {
-	color    color
-	distance float64
 }
 
 func check(err error) {
@@ -111,11 +106,12 @@ func validateArgs() {
 	}
 }
 
-func getDistance(rgb1, rgb2 rgb) float64 {
-	redDiff := float64(rgb1.Red) - float64(rgb2.Red)
-	greenDiff := float64(rgb1.Green) - float64(rgb2.Green)
-	blueDiff := float64(rgb1.Blue) - float64(rgb2.Blue)
-	return math.Sqrt(redDiff*redDiff + greenDiff*greenDiff + blueDiff*blueDiff)
+func (rgb rgb) RGB() (uint8, uint8, uint8) {
+	return rgb.Red, rgb.Green, rgb.Blue
+}
+
+func (c color) RGB() (uint8, uint8, uint8) {
+	return c.Rgb.Red, c.Rgb.Green, c.Rgb.Blue
 }
 
 func init() {
@@ -125,15 +121,15 @@ func init() {
 func main() {
 	validateArgs()
 
-	colorDistances := make([]colorDistance, 0, len(colors))
-	for _, color := range colors {
-		colorDistances = append(colorDistances, colorDistance{color, getDistance(srcRgb, color.RGB)})
+	rgbColors := make([]closest_colors.RGBColor, len(colors))
+	for i, c := range colors {
+		rgbColors[i] = c
 	}
-	sort.Slice(colorDistances, func(i, j int) bool {
-		return colorDistances[i].distance < colorDistances[j].distance
-	})
 
-	for _, cd := range colorDistances[:numberOfClosestColors] {
-		fmt.Printf("%d (%s: %s) (distance %.2f)\n", cd.color.Id, cd.color.Hex, cd.color.Name, cd.distance)
+	results, err := closest_colors.FindClosestRGBColors(srcRgb, numberOfClosestColors, rgbColors)
+	check(err)
+	for _, result := range results {
+		resultColor := result.Color.(color)
+		fmt.Printf("%d (%s: %s) (distance %.2f)\n", resultColor.Id, resultColor.Hex, resultColor.Name, result.Distance)
 	}
 }

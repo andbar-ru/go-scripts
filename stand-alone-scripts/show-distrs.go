@@ -11,34 +11,42 @@ import (
 )
 
 var (
-	DATABASE = path.Join(os.Getenv("HOME"), "Images/distrs/db.sqlite3")
+	database = path.Join(os.Getenv("HOME"), "Images/distrs/db.sqlite3")
 )
 
 type distr struct {
-	name        string
-	count       int
-	last_update int
+	name       string
+	count      int
+	lastUpdate int
+}
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
 
 func main() {
 	// Check if database exists
-	if _, err := os.Stat(DATABASE); os.IsNotExist(err) {
+	if _, err := os.Stat(database); os.IsNotExist(err) {
 		panic(err)
 	}
 
 	// Open database
-	db, err := sql.Open("sqlite3", DATABASE)
-	if err != nil {
-		panic(err)
-	}
+	db, err := sql.Open("sqlite3", database)
+	check(err)
 	defer db.Close()
+
+	// Print coordinates.
+	var latitude, longitude float64
+	err = db.QueryRow("SELECT latitude, longitude FROM stats ORDER BY date DESC LIMIT 1").Scan(&latitude, &longitude)
+	check(err)
+	fmt.Printf("Coordinates: %.4f %.4f\n\n", latitude, longitude)
 
 	// Query
 	query := "SELECT name, count, last_update FROM distrs ORDER BY count DESC, last_update ASC"
 	rows, err := db.Query(query)
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 	defer rows.Close()
 
 	// Collect distrs
@@ -47,10 +55,8 @@ func main() {
 	distrs := []distr{}
 	for rows.Next() {
 		var d distr
-		err := rows.Scan(&d.name, &d.count, &d.last_update)
-		if err != nil {
-			panic(err)
-		}
+		err := rows.Scan(&d.name, &d.count, &d.lastUpdate)
+		check(err)
 		distrs = append(distrs, d)
 
 		// Update name field size
@@ -58,11 +64,11 @@ func main() {
 			nameFieldSize = len(d.name)
 		}
 		// Update newest and oldest last_updates
-		if d.last_update > newestLastUpdate {
-			newestLastUpdate = d.last_update
+		if d.lastUpdate > newestLastUpdate {
+			newestLastUpdate = d.lastUpdate
 		}
-		if d.last_update < oldestLastUpdate {
-			oldestLastUpdate = d.last_update
+		if d.lastUpdate < oldestLastUpdate {
+			oldestLastUpdate = d.lastUpdate
 		}
 	}
 	countFieldSize = len(fmt.Sprint(distrs[0].count)) // number of digits
@@ -92,11 +98,11 @@ func main() {
 			boldness = 1
 		}
 		fmt.Printf("\x1b[%d;%dm", boldness, color)
-		fmt.Printf("%*d. %-*s %*d %d", numberFieldSize, i+1, nameFieldSize, distr.name, countFieldSize, distr.count, distr.last_update)
-		if distr.last_update == newestLastUpdate {
+		fmt.Printf("%*d. %-*s %*d %d", numberFieldSize, i+1, nameFieldSize, distr.name, countFieldSize, distr.count, distr.lastUpdate)
+		if distr.lastUpdate == newestLastUpdate {
 			fmt.Print(" newest")
 		}
-		if distr.last_update == oldestLastUpdate {
+		if distr.lastUpdate == oldestLastUpdate {
 			fmt.Print(" oldest")
 		}
 		fmt.Print("\x1b[0m")

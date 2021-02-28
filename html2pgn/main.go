@@ -27,12 +27,11 @@ var (
 var (
 	commonTags = `[Event "Stockfish vs Stockfish games"]
 [Site "localhost"]
-[Date "????.??.??"]
-[White "Stockfish 12"]
-[Black "Stockfish 12"]
+[White "Stockfish 13"]
+[Black "Stockfish 13"]
 [TimeControl "1800+0"]
 `
-	// Round, Result, ECO tags are dymamic.
+	// Date, Round, Result, ECO tags are dymamic.
 
 	pgn string
 )
@@ -55,17 +54,25 @@ func getClass(token html.Token) string {
 func fillTags(heading string) {
 	pgn += commonTags
 	fields := strings.Fields(heading)
-	if len(fields) < 3 {
+	if len(fields) < 4 {
 		return
 	}
 	round++
 	pgn += fmt.Sprintf("[Round \"%d\"]\n", round)
 	pgn += fmt.Sprintf("[ECO \"%s\"]\n", fields[1])
+
 	result := fields[2]
 	result = strings.Replace(result, ":", "-", 1)
 	result = strings.ReplaceAll(result, "½", "1/2")
 	pgn += fmt.Sprintf("[Result \"%s\"]\n", result)
 	currentResult = result
+
+	date := fields[3]
+	date = strings.Replace(date, "(", "", 1)
+	date = strings.Replace(date, ")", "", 1)
+	date = strings.ReplaceAll(date, "-", ".")
+	pgn += fmt.Sprintf("[Date \"%s\"]\n", date)
+
 	pgn += "\n"
 }
 

@@ -19,7 +19,7 @@ func TestMatyuganize(t *testing.T) {
 	for src, want := range src2want {
 		res := Matyuganize(src)
 		if res != want {
-			t.Errorf("Matyuganize(%q) = %s, want %s", src, res, want)
+			t.Errorf("Matyuganize(%q) = %q, want %q", src, res, want)
 		}
 	}
 }
@@ -28,7 +28,7 @@ func TestMatyuganize1(t *testing.T) {
 	for src, want := range src2want {
 		res := Matyuganize1(src)
 		if res != want {
-			t.Errorf("Matyuganize(%q) = %s, want %s", src, res, want)
+			t.Errorf("Matyuganize(%q) = %q, want %q", src, res, want)
 		}
 	}
 }

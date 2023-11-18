@@ -74,30 +74,28 @@ func Matyuganize(s string) string {
 func Matyuganize1(s string) string {
 	var resultBuilder strings.Builder
 	resultBuilder.Grow(len(s) + len(s)/4)
-
 	runeReader := strings.NewReader(s)
-	prev, _, err := runeReader.ReadRune()
-	if err != nil { // eof
-		return resultBuilder.String()
-	}
-	resultBuilder.WriteRune(prev)
-	cur, _, err := runeReader.ReadRune()
-	if err != nil { // eof
-		return resultBuilder.String()
-	}
-	resultBuilder.WriteRune(cur)
 
-	next, _, err := runeReader.ReadRune()
+	var prev = make([]rune, 3)
+	prev[0] = unicode.MaxRune
+	for i := 1; i < 3; i++ {
+		var err error
+		prev[i], _, err = runeReader.ReadRune()
+		if err != nil { // eof
+			return resultBuilder.String()
+		}
+		resultBuilder.WriteRune(prev[i])
+	}
+
+	cur, _, err := runeReader.ReadRune()
 	for err == nil { // not eof, next is valid
-		if prev == 'н' &&
-			(cur == 'а' || cur == 'е' || cur == 'и') &&
-			next != ' ' && !unicode.IsPunct(next) {
+		if !unicode.IsLetter(prev[0]) && prev[1] == 'н' && (prev[2] == 'а' || prev[2] == 'е' || prev[2] == 'и') && unicode.IsLetter(cur) {
 			resultBuilder.WriteRune(' ')
 		}
-		resultBuilder.WriteRune(next)
-		prev = cur
-		cur = next
-		next, _, err = runeReader.ReadRune()
+		resultBuilder.WriteRune(cur)
+		copy(prev, prev[1:])
+		prev[2] = cur
+		cur, _, err = runeReader.ReadRune()
 	}
 
 	return resultBuilder.String()

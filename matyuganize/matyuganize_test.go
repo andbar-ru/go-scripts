@@ -49,7 +49,7 @@ func TestWarAndPiece(t *testing.T) {
 		t.Errorf("Function \"Matyuganize1\" dosn't work")
 	}
 	if len(matyuganized) != len(matyuganized1) {
-		t.Errorf("Matyuganize and Matyuganize1 return different results")
+		t.Errorf("Matyuganize and Matyuganize1 return different results (%d != %d)", len(matyuganized), len(matyuganized1))
 		/*
 			err = os.WriteFile("WarAndPieceMatyuganized.txt", []byte(matyuganized), 0666)
 			if err != nil {

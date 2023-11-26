@@ -95,8 +95,8 @@ func parseGoFile(path string) error {
 
 func main() {
 	args := os.Args[1:]
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "You must specify directory as the first argument!")
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "You must specify directory as the only argument!")
 		os.Exit(1)
 	}
 	dir := args[0]

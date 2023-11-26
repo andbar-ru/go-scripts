@@ -39,7 +39,10 @@ func init() {
 
 func genSvg(points []XY) string {
 	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf(`<svg version="1.0" xmlns="http://www.w3.org/2000/svg" width="%dpx" height="%dpx">`, sizeX, sizeY))
+	buf.WriteString(fmt.Sprintf(`<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="%dpx" height="%dpx" viewBox="0 0 %d %d" style="background: white">`, sizeX, sizeY, sizeX, sizeY))
+	buf.WriteByte('\n')
+	// Белый фон вручную. Inkscape, например, игнорирует `background: white` в <svg>.
+	buf.WriteString(fmt.Sprintf(`<rect x="0" y="0" width="%dpx" height="%dpx" fill="white" />`, sizeX, sizeY))
 	buf.WriteByte('\n')
 	buf.WriteString("<polyline points=\"")
 

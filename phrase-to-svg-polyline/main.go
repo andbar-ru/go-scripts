@@ -3,46 +3,53 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 )
 
-type XY [2]int
+// Полярные координаты
+type PolarCoords struct {
+	// радиус
+	r int
+	// угол в радианах
+	phi float64
+}
+
+// Прямоугольные координаты для svg
+type SvgCoords [2]float64
+
+const debug = true
 
 var (
-	// Печатаемые символы ASCII в порядке увеличения кодов.
+	// Печатаемые символы ASCII в порядке увеличения кода.
 	characters = []byte(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
-	// rows и cols выбраны так, чтобы rows*cols >= len(characters) и близко к нему
-	rows = 10
-	cols = 10
-	// Размер ячейки
-	cellSize = 10
-	// Размеры поля
-	sizeX = rows * cellSize
-	sizeY = cols * cellSize
-	// Координаты байтов
-	byte2xy = make(map[byte]XY, len(characters))
+	// Отображение символа на угол в радианах
+	char2phi = make(map[byte]float64, len(characters))
+	// Базовый радиус в пикселях
+	r0 = 100
+	// Инкремент на каждый следующее появляение символа в пикселях
+	inc = 10
 )
 
-// init заполняет byte2xy.
+// init заполняет char2phi, равномерно распределяя углы по окружности.
 func init() {
-	for r := 0; r < rows; r++ {
-		for c := 0; c < cols; c++ {
-			i := r*rows + c
-			if i >= len(characters) {
-				return
-			}
-			xy := XY{c*cols + cellSize/2, r*rows + cellSize/2}
-			byte2xy[characters[i]] = xy
-		}
+	l := len(characters)
+	for i, c := range characters {
+		char2phi[c] = 2.0 * math.Pi / float64(l) * float64(i)
 	}
 }
 
-func genSvg(points []XY) string {
+// Генерирует и возвращает svg-код.
+// Точки points преобразуются в полилинию, а максимальный радиус rMax нужен, чтобы вычислить
+// размеры документа и уточнить координаты точек.
+func genSvg(points []SvgCoords, rMax int) string {
 	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf(`<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="%dpx" height="%dpx" viewBox="0 0 %d %d" style="background: white">`, sizeX, sizeY, sizeX, sizeY))
+	padding := 5
+	size := rMax*2 + padding*2
+	buf.WriteString(fmt.Sprintf(`<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="%dpx" height="%dpx" viewBox="0 0 %d %d" style="background: white">`, size, size, size, size))
 	buf.WriteByte('\n')
 	// Белый фон вручную. Inkscape, например, игнорирует `background: white` в <svg>.
-	buf.WriteString(fmt.Sprintf(`<rect x="0" y="0" width="%dpx" height="%dpx" fill="white" />`, sizeX, sizeY))
+	buf.WriteString(fmt.Sprintf(`<rect x="0" y="0" width="%dpx" height="%dpx" fill="white" />`, size, size))
 	buf.WriteByte('\n')
 	buf.WriteString("<polyline points=\"")
 
@@ -50,14 +57,26 @@ func genSvg(points []XY) string {
 		if i != 0 {
 			buf.WriteByte(' ')
 		}
-		buf.WriteString(fmt.Sprintf("%d %d", p[0], p[1]))
+		buf.WriteString(fmt.Sprintf("%v %v", p[0]+float64(padding), p[1]+float64(padding)))
 	}
 
-	buf.WriteString(`" fill="none" stroke="black" stroke-width="1" stroke-linecap="round" />`)
+	buf.WriteString(`" fill="none" stroke="black" stroke-width="0.5" stroke-linecap="round" />`)
+
+	if debug {
+		buf.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="1px" height="1px" fill="red" />`, size/2, size/2))
+		buf.WriteString(fmt.Sprintf(`<circle cx="%d" cy="%d" r="%d" fill-opacity="0" stroke="red" stroke-width="0.1" />`, size/2, size/2, r0))
+	}
+
 	buf.WriteByte('\n')
 	buf.WriteString("</svg>\n")
 
 	return buf.String()
+}
+
+func polar2svg(polar PolarCoords, rMax int) SvgCoords {
+	x := float64(polar.r)*math.Cos(polar.phi) + float64(rMax)
+	y := -(float64(polar.r) * math.Sin(polar.phi)) + float64(rMax)
+	return SvgCoords{x, y}
 }
 
 func main() {
@@ -68,19 +87,33 @@ func main() {
 	}
 	phrase := args[0]
 
-	points := make([]XY, 0, len(phrase))
+	char2count := make(map[byte]int)
+	polarPoints := make([]PolarCoords, 0, len(phrase))
+	rMax := r0
 
 	for i := 0; i < len(phrase); i++ {
-		b := phrase[i]
-		xy, ok := byte2xy[b]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Unallowed character %q in phrase. Printable ASCII characters are allowed only.\n", b)
-			os.Exit(1)
+		char := phrase[i]
+		count := char2count[char]
+		char2count[char]++
+		r := r0 + count*inc
+		if r > rMax {
+			rMax = r
 		}
-		points = append(points, xy)
+		phi, ok := char2phi[char]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Unallowed character %q in phrase. Printable ASCII characters are allowed only. Skipped.\n", char)
+			continue
+		}
+		pPoint := PolarCoords{r: r, phi: phi}
+		polarPoints = append(polarPoints, pPoint)
 	}
 
-	svg := genSvg(points)
+	points := make([]SvgCoords, 0, len(polarPoints))
+	for _, pPoint := range polarPoints {
+		points = append(points, polar2svg(pPoint, rMax))
+	}
+
+	svg := genSvg(points, rMax)
 
 	fmt.Println(svg)
 }

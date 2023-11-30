@@ -18,7 +18,7 @@ type PolarCoords struct {
 // Прямоугольные координаты для svg
 type SvgCoords [2]float64
 
-const debug = true
+const debug = false
 
 var (
 	// Печатаемые символы ASCII в порядке увеличения кода.
@@ -57,7 +57,7 @@ func genSvg(points []SvgCoords, rMax int) string {
 		if i != 0 {
 			buf.WriteByte(' ')
 		}
-		buf.WriteString(fmt.Sprintf("%v %v", p[0]+float64(padding), p[1]+float64(padding)))
+		buf.WriteString(fmt.Sprintf("%.1f %.1f", p[0]+float64(padding), p[1]+float64(padding)))
 	}
 
 	buf.WriteString(`" fill="none" stroke="black" stroke-width="0.5" stroke-linecap="round" />`)

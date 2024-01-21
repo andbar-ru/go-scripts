@@ -30,7 +30,7 @@ func setHeaders(request *http.Request) {
 	request.Header.Set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
 	request.Header.Set("accept-language", "en-US,en;q=0.6")
 	request.Header.Set("cache-control", "no-cache")
-	request.Header.Set("cookie", "Insert value from browser session")
+	request.Header.Set("cookie", "Insert value from browser session") // FIXME
 	request.Header.Add("pragma", "no-cache")
 	request.Header.Set("sec-ch-ua", `"Brave";v="119", "Chromium";v="119", "Not?A_Brand";v="24"`)
 	request.Header.Set("sec-ch-ua-mobile", "?0")

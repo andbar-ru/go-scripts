@@ -32,19 +32,30 @@ var (
 	}
 )
 
-// luminance (perceived brightness) вычисляет относительную яркость цвета.
-// Процесс вычисления подробно можно посмотреть на странице https://www.101computing.net/colour-luminance-and-contrast-ratio/.
-func luminance(color string) (float64, error) {
+// rgb возвращает значения rgb в диапазоне от 0 до 1 для цвета, заданного в hex-формате.
+func rgb(color string) ([3]float64, error) {
+	var rgb [3]float64
+
 	if !colorRgx.MatchString(color) {
-		return 0, fmt.Errorf("invalid hex color: %q", color)
+		return rgb, fmt.Errorf("invalid hex color: %q", color)
 	}
 	rr, _ := strconv.ParseInt(color[1:3], 16, 64)
 	gg, _ := strconv.ParseInt(color[3:5], 16, 64)
 	bb, _ := strconv.ParseInt(color[5:7], 16, 64)
-	r := float64(rr) / 255
-	g := float64(gg) / 255
-	b := float64(bb) / 255
-	rgb := [3]float64{r, g, b}
+	rgb[0] = float64(rr) / 255
+	rgb[1] = float64(gg) / 255
+	rgb[2] = float64(bb) / 255
+
+	return rgb, nil
+}
+
+// luminance (perceived brightness) вычисляет относительную яркость цвета.
+// Процесс вычисления подробно можно посмотреть на странице https://www.101computing.net/colour-luminance-and-contrast-ratio/.
+func luminance(color string) (float64, error) {
+	rgb, err := rgb(color)
+	if err != nil {
+		return 0.0, err
+	}
 
 	for i := range rgb {
 		if rgb[i] <= 0.03928 {
@@ -81,6 +92,67 @@ func contrast(color1, color2 string) (float64, error) {
 	c := (l2 + 0.05) / (l1 + 0.05)
 
 	return c, nil
+}
+
+// hue вычисляет тон цвета и возвращает в градусах в диапазоне [0, 360).
+// Формулу взял здесь: https://www.rapidtables.com/convert/color/rgb-to-hsl.html
+func hue(color string) (float64, error) {
+	rgb, err := rgb(color)
+	if err != nil {
+		return 0, err
+	}
+
+	var max, min = 0.0, 1.0
+	for _, c := range rgb {
+		if c > max {
+			max = c
+		}
+		if c < min {
+			min = c
+		}
+	}
+	delta := max - min
+
+	var hue float64
+
+	switch {
+	case delta == 0:
+		hue = 0
+	case max == rgb[0]:
+		hue = (rgb[1] - rgb[2]) / delta
+	case max == rgb[1]:
+		hue = (rgb[2]-rgb[0])/delta + 2
+	case max == rgb[2]:
+		hue = (rgb[0]-rgb[1])/delta + 4
+	default:
+		return 0, fmt.Errorf("unexpected max = %v when rgb is %v", max, rgb)
+	}
+
+	hue *= 60
+	if hue < 0 {
+		hue += 360
+	}
+
+	return hue, nil
+}
+
+func avg(values []float64) float64 {
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	avg := sum / float64(len(values))
+	return avg
+}
+
+func std(values []float64) float64 {
+	avg := avg(values)
+	var sumSqr float64
+	for _, v := range values {
+		sumSqr += (v - avg) * (v - avg)
+	}
+	std := math.Sqrt(sumSqr / float64(len(values)))
+	return std
 }
 
 type contrastStats struct {
@@ -131,7 +203,7 @@ func (t theme) syntaxContrastStats() (contrastStats, error) {
 
 	var stats contrastStats
 
-	var min, max, sum float64 = math.Inf(1), 0, 0
+	var min, max float64 = math.Inf(1), 0
 	for _, c := range contrasts {
 		if c < min {
 			min = c
@@ -139,23 +211,48 @@ func (t theme) syntaxContrastStats() (contrastStats, error) {
 		if c > max {
 			max = c
 		}
-		sum += c
 	}
-	avg := sum / float64(len(contrasts))
 
 	stats.min = min
 	stats.max = max
-	stats.avg = avg
-
-	sumSqr := 0.0
-	for _, c := range contrasts {
-		sumSqr += (c - avg) * (c - avg)
-	}
-	std := math.Sqrt(sumSqr / float64(len(contrasts)))
-
-	stats.std = std
+	stats.avg = avg(contrasts)
+	stats.std = std(contrasts)
 
 	return stats, nil
+}
+
+func (t theme) syntaxColorsHueIncStd() (float64, error) {
+	// Убираем дубликаты из syntaxColors
+	uniqSyntaxColors := make([]string, 0, len(t.syntaxColors))
+	colorsMap := make(map[string]struct{}, len(t.syntaxColors))
+	for _, c := range t.syntaxColors {
+		if _, ok := colorsMap[c]; !ok {
+			uniqSyntaxColors = append(uniqSyntaxColors, c)
+		}
+		colorsMap[c] = struct{}{}
+	}
+
+	hues := make([]float64, 0, len(uniqSyntaxColors))
+	for _, c := range uniqSyntaxColors {
+		h, err := hue(c)
+		if err != nil {
+			return 0, err
+		}
+		hues = append(hues, h)
+	}
+
+	slices.Sort(hues)
+
+	hues = append(hues, hues[0]+360)
+
+	incs := make([]float64, 0, len(hues))
+	for i := 0; i < len(hues)-1; i++ {
+		incs = append(incs, hues[i+1]-hues[i])
+	}
+
+	std := std(incs)
+
+	return std, nil
 }
 
 func (t theme) score() (int, error) {
@@ -208,6 +305,20 @@ func (t theme) score() (int, error) {
 	} else if syntaxContrastStd < 2 {
 		score += 2
 	} else if syntaxContrastStd < 3 {
+		score += 1
+	} else {
+		score += 0
+	}
+
+	hueIncStd, err := t.syntaxColorsHueIncStd()
+	if err != nil {
+		return 0, err
+	}
+	if hueIncStd < 20 {
+		score += 3
+	} else if hueIncStd < 40 {
+		score += 2
+	} else if hueIncStd < 60 {
 		score += 1
 	} else {
 		score += 0
@@ -353,6 +464,7 @@ func main() {
 		name                string
 		baseContrast        float64
 		syntaxContrastStats contrastStats
+		hueIncStd           float64
 		score               int
 	}
 
@@ -383,6 +495,10 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		hueIncStd, err := parsedTheme.syntaxColorsHueIncStd()
+		if err != nil {
+			panic(err)
+		}
 		score, err := parsedTheme.score()
 		if err != nil {
 			panic(err)
@@ -394,12 +510,12 @@ func main() {
 			if len(name) > maxLightThemeNameLen {
 				maxLightThemeNameLen = len(name)
 			}
-			lightThemes = append(lightThemes, entry{name, baseContrast, syntaxContrastStats, score})
+			lightThemes = append(lightThemes, entry{name, baseContrast, syntaxContrastStats, hueIncStd, score})
 		} else if parsedTheme.type_ == "dark" {
 			if len(name) > maxDarkThemeNameLen {
 				maxDarkThemeNameLen = len(name)
 			}
-			darkThemes = append(darkThemes, entry{name, baseContrast, syntaxContrastStats, score})
+			darkThemes = append(darkThemes, entry{name, baseContrast, syntaxContrastStats, hueIncStd, score})
 		} else {
 			log.Panicf("unexpected theme type: %q", parsedTheme.type_)
 		}
@@ -414,7 +530,7 @@ func main() {
 
 	fmt.Println("--------------------------------------------------")
 	fmt.Println("Light themes sorted by score asc:")
-	fmt.Println("name | base contrast | min syntax contrast | max syntax contrast | avg syntax contrast | syntax contrast std | score")
+	fmt.Println("name | base contrast | min syntax contrast | avg syntax contrast | syntax contrast std | hue inc std | score")
 	fmt.Println("--------------------------------------------------")
 	for _, entry := range lightThemes {
 		fmt.Printf("%-*s: %5.2f %8.2f %8.2f %8.2f %8.2f %10d\n",
@@ -422,9 +538,9 @@ func main() {
 			entry.name,
 			entry.baseContrast,
 			entry.syntaxContrastStats.min,
-			entry.syntaxContrastStats.max,
 			entry.syntaxContrastStats.avg,
 			entry.syntaxContrastStats.std,
+			entry.hueIncStd,
 			entry.score,
 		)
 	}
@@ -432,7 +548,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("--------------------------------------------------")
 	fmt.Println("Dark themes sorted by score asc:")
-	fmt.Println("name | base contrast | min syntax contrast | max syntax contrast | avg syntax contrast | syntax contrast std | score")
+	fmt.Println("name | base contrast | min syntax contrast | avg syntax contrast | syntax contrast std | hue inc std | score")
 	fmt.Println("--------------------------------------------------")
 	for _, entry := range darkThemes {
 		fmt.Printf("%-*s: %5.2f %8.2f %8.2f %8.2f %8.2f %10d\n",
@@ -440,9 +556,9 @@ func main() {
 			entry.name,
 			entry.baseContrast,
 			entry.syntaxContrastStats.min,
-			entry.syntaxContrastStats.max,
 			entry.syntaxContrastStats.avg,
 			entry.syntaxContrastStats.std,
+			entry.hueIncStd,
 			entry.score,
 		)
 	}

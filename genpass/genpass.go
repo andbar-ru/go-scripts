@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"time"
 )
 
 const (
@@ -19,6 +18,7 @@ const (
 	uDesc = "включить в набор прописные буквы"
 	dDesc = "включить в набор цифры"
 	sDesc = "включить в набор спецсимволы"
+	rDesc = "количество символов, на которое надо произвести циклический сдвиг влево"
 	cDesc = "количество символов, из которого будет состоять пароль, по умолчанию 12, максимум 64"
 	nDesc = "количество генерируемых паролей, если не заданы фразы, иначе определяется по числу фраз"
 	hDesc = "справка по программе"
@@ -43,8 +43,8 @@ func printHelp() {
 	fmt.Printf("  -u  %s\n", uDesc)
 	fmt.Printf("  -d  %s\n", dDesc)
 	fmt.Printf("  -s  %s\n", sDesc)
+	fmt.Printf("  -r <число>  %s\n", rDesc) // от rotate
 	fmt.Printf("  -c <число>  %s\n", cDesc)
-	fmt.Println()
 	fmt.Printf("  -n <число>  %s\n", nDesc)
 	fmt.Printf("  -h  %s\n", hDesc)
 
@@ -61,6 +61,7 @@ func main() {
 	u := flag.Bool("u", false, uDesc)
 	d := flag.Bool("d", false, dDesc)
 	s := flag.Bool("s", false, sDesc)
+	r := flag.Int("r", 0, rDesc)
 	c := flag.Int("c", 12, cDesc)
 	n := flag.Int("n", 1, nDesc)
 	h := flag.Bool("h", false, "Справка")
@@ -72,6 +73,10 @@ func main() {
 	}
 
 	// Проверка ключей
+	if *r > 64 || *r < 0 {
+		fmt.Fprintf(os.Stderr, "Сдвиг символов (-r=%d) неправильный, допускается от 0 до 64\n", *r)
+		os.Exit(1)
+	}
 	if *c > 64 || *c < 1 {
 		fmt.Fprintf(os.Stderr, "Количество символов (-c=%d) неправильное, должно быть от 1 до 64\n", *c)
 		os.Exit(1)
@@ -114,7 +119,6 @@ func main() {
 
 	if len(phrases) == 0 {
 		// Если не заданы фразы, то генерируются рандомные пароли.
-		rand.Seed(time.Now().UnixNano())
 		for i := 0; i < *n; i++ {
 			for i := range password {
 				password[i] = characters[rand.Intn(charactersLen)]
@@ -125,6 +129,14 @@ func main() {
 		// Если фразы заданы, то для каждой фразы по определённому алгоритму вычисляется пароль.
 		for _, phrase := range phrases {
 			sum := sha512.Sum512([]byte(phrase))
+			// Циклический сдвиг влево
+			if *r > 0 {
+				l := len(sum)
+				temp := make([]byte, l)
+				copy(temp[:l-*r], sum[*r:])
+				copy(temp[l-*r:], sum[:*r])
+				sum = [64]byte(temp)
+			}
 			for i := range password {
 				password[i] = characters[int(sum[i])%charactersLen]
 			}

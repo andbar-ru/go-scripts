@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -23,28 +24,38 @@ import (
 
 const (
 	successPoints = 12
+	userAgent     = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36" // Brave 1.93.134
 )
 
+// Флаги
 var (
 	help           bool
 	dbPath         string
 	filePath       string
-	stopAfterNHits int
+	onlyDB         bool
+	onlyFile       bool
+	shuffleFile    bool
 	timeoutSecs    int
 	targetURL      string
+	stopAfterNHits int
 	minSpeedForHit int
-	shuffle        bool
+)
 
+// Ошибки
+var (
 	errCreatingSOCKS5Dialer     = errors.New("failed to create SOCKS5 dialer")
 	errDialerIsNotContextDialer = errors.New("proxy dialer does not implement proxy.ContextDialer")
+)
 
+// Переменные, инициируемые позже.
+var (
 	db     *sql.DB
+	file   *os.File
 	client *http.Client
 )
 
-type Proxy struct {
+type Hit struct {
 	address string
-	success bool
 	speed   int
 }
 
@@ -53,6 +64,9 @@ func init() {
 
 	if dbPath != "" {
 		initDB(dbPath)
+	}
+	if filePath != "" {
+		initFile(filePath)
 	}
 
 	client = &http.Client{
@@ -75,19 +89,33 @@ func helpAndExit(err error) {
 func initFlags() {
 	flag.BoolVar(&help, "help", false, "print help")
 	flag.StringVar(&dbPath, "db", "", "path to the database")
-	flag.StringVar(&filePath, "file", "", "path to the file with the list of proxy servers")
-	flag.IntVar(&stopAfterNHits, "stop-after-n-hits", 0, "the number of hits to stop after. Hit is any success with speed not less than -min-speed-for-hit.")
-	flag.IntVar(&timeoutSecs, "timeout", 24, "timeout for HTTP requests")
-	flag.StringVar(&targetURL, "target", "https://www.youtube.com", "target URL to make requests to")
-	flag.IntVar(&minSpeedForHit, "min-speed-for-hit", 0, "the minimum speed at which the success is a hit")
-	flag.BoolVar(&shuffle, "shuffle", false, "shuffle proxies if source is a file")
+	flag.StringVar(&filePath, "file", "", "path to the file containing a list of proxy servers, one ip:port per line")
+	flag.BoolVar(&onlyDB, "only-db", false, "use only the database as the source. Mutually exclusive with -only-file.")
+	flag.BoolVar(&onlyFile, "only-file", false, "use only the file as the source. Mutually exclusive with -only-db.")
+	flag.BoolVar(&shuffleFile, "shuffle-file", false, "shuffle the proxies from the file source")
+	flag.IntVar(&timeoutSecs, "timeout", 24, "timeout for HTTP requests, in seconds")
+	flag.StringVar(&targetURL, "target", "https://www.youtube.com", "URL to request through each proxy")
+	flag.IntVar(&stopAfterNHits, "stop-after-n-hits", 0, "number of hits to stop after. 0 means no limit. A hit is any success with a speed not less than -min-speed-for-hit.")
+	flag.IntVar(&minSpeedForHit, "min-speed-for-hit", 0, "minimum speed, in bytes per second, at which the success counts as a hit")
 	flag.Parse()
 
 	if help {
 		helpAndExit(nil)
 	}
 	if filePath == "" && dbPath == "" {
-		helpAndExit(errors.New("neither --file nor --db are specified. It's not clear what to do."))
+		helpAndExit(errors.New("neither -file nor -db is specified. At least one source is required."))
+	}
+	if onlyDB && dbPath == "" {
+		helpAndExit(errors.New("-only-db requires -db to be specified"))
+	}
+	if onlyFile && filePath == "" {
+		helpAndExit(errors.New("-only-file requires -file to be specified"))
+	}
+	if shuffleFile && filePath == "" {
+		helpAndExit(errors.New("-shuffle-file requires -file to be specified"))
+	}
+	if onlyDB && onlyFile {
+		helpAndExit(errors.New("-only-db and -only-file are mutually exclusive"))
 	}
 }
 
@@ -113,6 +141,70 @@ func initDB(dbPath string) {
 	}
 }
 
+func initFile(filePath string) {
+	if filePath == "" {
+		log.Fatal("Empty filePath")
+	}
+
+	var err error
+	file, err = os.Open(filePath)
+	if err != nil {
+		log.Fatalf("Failed to open file %s: %v", filePath, err)
+	}
+}
+
+func getProxiesFromDB() ([]string, error) {
+	query := `SELECT address FROM proxies WHERE points > 0 ORDER BY points DESC, speed DESC`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query '%s' failed: %w", query, err)
+	}
+	defer rows.Close()
+
+	var proxies []string
+
+	for rows.Next() {
+		var proxy string
+		if err := rows.Scan(&proxy); err != nil {
+			return nil, fmt.Errorf("query '%s' scan failed: %w", query, err)
+		}
+		proxies = append(proxies, proxy)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("query '%s' iteration failed: %w", query, err)
+	}
+
+	return proxies, nil
+}
+
+func getProxiesFromFile() ([]string, error) {
+	var proxies []string
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		addrPort, err := netip.ParseAddrPort(line)
+		if err != nil || !addrPort.IsValid() {
+			continue
+		}
+		proxies = append(proxies, addrPort.String())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	if shuffleFile {
+		rand.Shuffle(len(proxies), func(i, j int) {
+			proxies[i], proxies[j] = proxies[j], proxies[i]
+		})
+	}
+
+	return proxies, nil
+}
+
 func updateInDB(address string, success bool, speed int) error {
 	var query string
 	var params []any
@@ -124,6 +216,9 @@ func updateInDB(address string, success bool, speed int) error {
 			updated_at = CURRENT_TIMESTAMP`
 		params = []any{address, successPoints, speed}
 	} else {
+		// Не обновляю записи о неудачных прокси, если их нет в базе. Вариант с points = 0 тоже
+		// считается отсутствующим при сканировании. Это сделано намеренно, чтобы не держать в базе
+		// прокси, которые никогда не были рабочими.
 		query = `UPDATE proxies SET
 			points = points - 1,
 			updated_at = CURRENT_TIMESTAMP
@@ -150,24 +245,33 @@ func checkProxy(address string) (int, error) {
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return contextDialer.DialContext(ctx, network, addr)
 		},
+		ForceAttemptHTTP2: true,
 	}
 	defer transport.CloseIdleConnections()
 
+	// Менять транспорт у глобального клиента допустимо, только если прокси будут проверяться
+	// последовательно. Если надумаю реализовать конкурентность, то понадобится делать собственный
+	// клиент для каждого прокси.
 	client.Transport = transport
 
 	start := time.Now()
 
-	resp, err := client.Get(targetURL)
+	request, err := http.NewRequest("GET", targetURL, nil)
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	request.Header.Add("User-Agent", userAgent)
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("status code %d", resp.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("status code %d", response.StatusCode)
 	}
 
-	nBytes, err := io.Copy(io.Discard, resp.Body)
+	nBytes, err := io.Copy(io.Discard, response.Body)
 	if err != nil {
 		return 0, err
 	}
@@ -177,23 +281,21 @@ func checkProxy(address string) (int, error) {
 	return speed, nil
 }
 
-func checkProxies(addresses []string) ([]Proxy, error) {
-	fmt.Printf("target url is %s\n\n", targetURL)
+func checkProxies(proxies []string) ([]Hit, error) {
+	var hits []Hit
+	numProxies := len(proxies)
 
-	var hitCount int
-	var hitProxies []Proxy
+	for i, proxy := range proxies {
+		fmt.Printf("%d/%d. %s:", i+1, numProxies, proxy)
 
-	for i, address := range addresses {
-		fmt.Printf("%d. %s:", i+1, address)
-
-		speed, err := checkProxy(address)
+		speed, err := checkProxy(proxy)
 		if err != nil {
 			if errors.Is(err, errCreatingSOCKS5Dialer) || errors.Is(err, errDialerIsNotContextDialer) {
 				return nil, err
 			}
 			fmt.Printf(" FAIL: %v\n", err)
 			if db != nil {
-				if err := updateInDB(address, false, 0); err != nil {
+				if err := updateInDB(proxy, false, 0); err != nil {
 					log.Printf("ERROR: failed to update in database: %v", err)
 				}
 			}
@@ -202,121 +304,79 @@ func checkProxies(addresses []string) ([]Proxy, error) {
 
 		fmt.Printf(" SUCCESS, Speed: %d b/s\n", speed)
 		if db != nil {
-			if err := updateInDB(address, true, speed); err != nil {
+			if err := updateInDB(proxy, true, speed); err != nil {
 				log.Printf("ERROR: failed to update in database: %v", err)
 			}
 		}
 		if speed >= minSpeedForHit {
-			hitCount++
-			hitProxies = append(hitProxies, Proxy{
-				address: address,
-				success: true,
+			hits = append(hits, Hit{
+				address: proxy,
 				speed:   speed,
 			})
 		}
-		if stopAfterNHits > 0 && hitCount >= stopAfterNHits {
+		if stopAfterNHits > 0 && len(hits) >= stopAfterNHits {
 			break
 		}
 	}
 
-	slices.SortFunc(hitProxies, func(a, b Proxy) int {
-		return b.speed - a.speed
+	slices.SortFunc(hits, func(a, b Hit) int {
+		return cmp.Compare(b.speed, a.speed)
 	})
 
-	return hitProxies, nil
-}
-
-func handleFile() ([]Proxy, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var addresses []string
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		addrPort, err := netip.ParseAddrPort(line)
-		if err != nil || !addrPort.IsValid() {
-			continue
-		}
-		addresses = append(addresses, addrPort.String())
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	file.Close()
-
-	if shuffle {
-		rand.Shuffle(len(addresses), func(i, j int) {
-			addresses[i], addresses[j] = addresses[j], addresses[i]
-		})
-	}
-
-	return checkProxies(addresses)
-}
-
-func handleDB() ([]Proxy, error) {
-	query := `SELECT address FROM proxies WHERE points > 0 ORDER BY points DESC, speed DESC`
-
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("query '%s' failed: %w", query, err)
-	}
-	defer rows.Close()
-
-	var addresses []string
-
-	for rows.Next() {
-		var address string
-		if err := rows.Scan(&address); err != nil {
-			return nil, fmt.Errorf("query '%s' scan failed: %w", query, err)
-		}
-		addresses = append(addresses, address)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("query '%s' iteration failed: %w", query, err)
-	}
-
-	// Надо закрыть, так как checkProxies будет работать с той же таблицей.
-	rows.Close()
-
-	return checkProxies(addresses)
+	return hits, nil
 }
 
 func main() {
 	if db != nil {
 		defer db.Close()
 	}
-
-	var err error
-	var proxies []Proxy
-
-	switch {
-	case filePath != "":
-		proxies, err = handleFile()
-	case db != nil:
-		proxies, err = handleDB()
-	default:
-		log.Fatal("unexpected case")
+	if file != nil {
+		defer file.Close()
 	}
 
+	var proxies []string
+	uniqueProxies := make(map[string]bool)
+
+	if db != nil && !onlyFile {
+		dbProxies, err := getProxiesFromDB()
+		if err != nil {
+			log.Fatalf("Failed to get proxies from database: %v", err)
+		}
+		for _, proxy := range dbProxies {
+			// В базе прокси гарантированно не повторяются, поэтому не проверяем.
+			uniqueProxies[proxy] = true
+			proxies = append(proxies, proxy)
+		}
+	}
+	if file != nil && !onlyDB {
+		fileProxies, err := getProxiesFromFile()
+		if err != nil {
+			log.Fatalf("Failed to get proxies from file: %v", err)
+		}
+		// В файле могут быть прокси, которые уже есть в базе, поэтому проверяем.
+		for _, proxy := range fileProxies {
+			if !uniqueProxies[proxy] {
+				uniqueProxies[proxy] = true
+				proxies = append(proxies, proxy)
+			}
+		}
+	}
+
+	fmt.Printf("Target URL: %s\n\n", targetURL)
+
+	hits, err := checkProxies(proxies)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to check proxies: %v", err)
 	}
 
 	fmt.Println()
-	if len(proxies) > 0 {
+
+	if len(hits) > 0 {
 		fmt.Println("Hit proxies:")
-		for i, prx := range proxies {
-			fmt.Printf("%d. %s\t%d b/s\n", i+1, prx.address, prx.speed)
+		for i, hit := range hits {
+			fmt.Printf("%d. %s\t%d b/s\n", i+1, hit.address, hit.speed)
 		}
 	} else {
-		fmt.Println("There are no hit proxies")
+		fmt.Println("There are no hits :-(")
 	}
 }

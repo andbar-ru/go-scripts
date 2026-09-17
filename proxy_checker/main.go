@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -39,6 +40,7 @@ var (
 	targetURL      string
 	stopAfterNHits int
 	minSpeedForHit int
+	numWorkers     int
 )
 
 // Ошибки
@@ -49,14 +51,14 @@ var (
 
 // Переменные, инициируемые позже.
 var (
-	db     *sql.DB
-	file   *os.File
-	client *http.Client
+	db   *sql.DB
+	file *os.File
 )
 
-type Hit struct {
+type Result struct {
 	address string
 	speed   int
+	err     error
 }
 
 func init() {
@@ -67,10 +69,6 @@ func init() {
 	}
 	if filePath != "" {
 		initFile(filePath)
-	}
-
-	client = &http.Client{
-		Timeout: time.Duration(timeoutSecs) * time.Second,
 	}
 }
 
@@ -93,10 +91,11 @@ func initFlags() {
 	flag.BoolVar(&onlyDB, "only-db", false, "use only the database as the source. Mutually exclusive with -only-file.")
 	flag.BoolVar(&onlyFile, "only-file", false, "use only the file as the source. Mutually exclusive with -only-db.")
 	flag.BoolVar(&shuffleFile, "shuffle-file", false, "shuffle the proxies from the file source")
-	flag.IntVar(&timeoutSecs, "timeout", 24, "timeout for HTTP requests, in seconds")
+	flag.IntVar(&timeoutSecs, "timeout", 24, "timeout for HTTP requests, in seconds. 0 means no timeout.")
 	flag.StringVar(&targetURL, "target", "https://www.youtube.com", "URL to request through each proxy")
 	flag.IntVar(&stopAfterNHits, "stop-after-n-hits", 0, "number of hits to stop after. 0 means no limit. A hit is any success with a speed not less than -min-speed-for-hit.")
-	flag.IntVar(&minSpeedForHit, "min-speed-for-hit", 0, "minimum speed, in bytes per second, at which the success counts as a hit")
+	flag.IntVar(&minSpeedForHit, "min-speed-for-hit", 0, "minimum speed, in bytes per second, at which a success counts as a hit")
+	flag.IntVar(&numWorkers, "workers", 24, "number of proxies to check concurrently")
 	flag.Parse()
 
 	if help {
@@ -116,6 +115,9 @@ func initFlags() {
 	}
 	if onlyDB && onlyFile {
 		helpAndExit(errors.New("-only-db and -only-file are mutually exclusive"))
+	}
+	if numWorkers < 1 {
+		helpAndExit(errors.New("-workers must be > 0"))
 	}
 }
 
@@ -186,7 +188,7 @@ func getProxiesFromFile() ([]string, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		addrPort, err := netip.ParseAddrPort(line)
-		if err != nil || !addrPort.IsValid() {
+		if err != nil {
 			continue
 		}
 		proxies = append(proxies, addrPort.String())
@@ -205,16 +207,16 @@ func getProxiesFromFile() ([]string, error) {
 	return proxies, nil
 }
 
-func updateInDB(address string, success bool, speed int) error {
+func updateInDB(result Result) error {
 	var query string
 	var params []any
-	if success {
+	if result.err == nil {
 		query = `INSERT INTO proxies (address, points, speed) VALUES (?, ?, ?)
 		ON CONFLICT(address) DO UPDATE SET
 			points = excluded.points,
 			speed = excluded.speed,
 			updated_at = CURRENT_TIMESTAMP`
-		params = []any{address, successPoints, speed}
+		params = []any{result.address, successPoints, result.speed}
 	} else {
 		// Не обновляю записи о неудачных прокси, если их нет в базе. Вариант с points = 0 тоже
 		// считается отсутствующим при сканировании. Это сделано намеренно, чтобы не держать в базе
@@ -223,14 +225,14 @@ func updateInDB(address string, success bool, speed int) error {
 			points = points - 1,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE address = ? AND points > 0`
-		params = []any{address}
+		params = []any{result.address}
 	}
 
 	_, err := db.Exec(query, params...)
 	return err
 }
 
-func checkProxy(address string) (int, error) {
+func checkProxy(ctx context.Context, address string) (int, error) {
 	dialer, err := proxy.SOCKS5("tcp", address, nil, proxy.Direct)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", errCreatingSOCKS5Dialer, err)
@@ -249,14 +251,14 @@ func checkProxy(address string) (int, error) {
 	}
 	defer transport.CloseIdleConnections()
 
-	// Менять транспорт у глобального клиента допустимо, только если прокси будут проверяться
-	// последовательно. Если надумаю реализовать конкурентность, то понадобится делать собственный
-	// клиент для каждого прокси.
-	client.Transport = transport
+	client := &http.Client{
+		Timeout:   time.Duration(timeoutSecs) * time.Second,
+		Transport: transport,
+	}
 
 	start := time.Now()
 
-	request, err := http.NewRequest("GET", targetURL, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -281,45 +283,82 @@ func checkProxy(address string) (int, error) {
 	return speed, nil
 }
 
-func checkProxies(proxies []string) ([]Hit, error) {
-	var hits []Hit
+func checkProxies(proxies []string) ([]Result, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var hits []Result
 	numProxies := len(proxies)
+	addresses := make(chan string)
+	// Канал с буфером, чтобы горутинам воркеров было, куда сбросить результат, и они не утекли.
+	results := make(chan Result, numWorkers)
+	var wg sync.WaitGroup
 
-	for i, proxy := range proxies {
-		fmt.Printf("%d/%d. %s:", i+1, numProxies, proxy)
-
-		speed, err := checkProxy(proxy)
-		if err != nil {
-			if errors.Is(err, errCreatingSOCKS5Dialer) || errors.Is(err, errDialerIsNotContextDialer) {
-				return nil, err
-			}
-			fmt.Printf(" FAIL: %v\n", err)
-			if db != nil {
-				if err := updateInDB(proxy, false, 0); err != nil {
-					log.Printf("ERROR: failed to update in database: %v", err)
+	for range numWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for address := range addresses {
+				speed, err := checkProxy(ctx, address)
+				select {
+				case results <- Result{
+					address: address,
+					speed:   speed,
+					err:     err,
+				}:
+				case <-ctx.Done():
+					return
 				}
 			}
-			continue
+		}()
+	}
+
+	go func() {
+		defer close(addresses)
+		for _, proxy := range proxies {
+			select {
+			case addresses <- proxy:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var i int
+	for result := range results {
+		i++
+		var message string
+		if result.err != nil {
+			if errors.Is(result.err, errCreatingSOCKS5Dialer) || errors.Is(result.err, errDialerIsNotContextDialer) {
+				return nil, result.err
+			}
+			message = fmt.Sprintf("FAIL: %v", result.err)
+		} else {
+			message = fmt.Sprintf("SUCCESS, speed: %d b/s", result.speed)
 		}
 
-		fmt.Printf(" SUCCESS, Speed: %d b/s\n", speed)
+		fmt.Printf("%d/%d. %s: %s\n", i, numProxies, result.address, message)
+
 		if db != nil {
-			if err := updateInDB(proxy, true, speed); err != nil {
+			if err := updateInDB(result); err != nil {
 				log.Printf("ERROR: failed to update in database: %v", err)
 			}
 		}
-		if speed >= minSpeedForHit {
-			hits = append(hits, Hit{
-				address: proxy,
-				speed:   speed,
-			})
+
+		if result.err == nil && result.speed >= minSpeedForHit {
+			hits = append(hits, result)
 		}
 		if stopAfterNHits > 0 && len(hits) >= stopAfterNHits {
 			break
 		}
 	}
 
-	slices.SortFunc(hits, func(a, b Hit) int {
+	slices.SortFunc(hits, func(a, b Result) int {
 		return cmp.Compare(b.speed, a.speed)
 	})
 

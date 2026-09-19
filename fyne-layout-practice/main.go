@@ -17,12 +17,21 @@ const (
 	argConstraint = "The argument must be an integer between 1 and 6."
 )
 
-func newDot() *canvas.Circle {
-	return canvas.NewCircle(color.Black)
+var faceLayouts = map[int]fyne.Layout{
+	1: new(oneDotLayout),
+	2: new(twoDotsLayout),
+	3: new(threeDotsLayout),
+	4: new(fourDotsLayout),
+	5: new(fiveDotsLayout),
+	6: new(sixDotsLayout),
 }
 
-var number2layout = map[int]fyne.Layout{
-	1: new(oneDotLayout),
+func makeDots(number int) []fyne.CanvasObject {
+	dots := make([]fyne.CanvasObject, number)
+	for i := 0; i < number; i++ {
+		dots[i] = canvas.NewCircle(color.Black)
+	}
+	return dots
 }
 
 func main() {
@@ -36,14 +45,14 @@ func main() {
 	}
 
 	a := app.New()
-	w := a.NewWindow(fmt.Sprintf("Die face: %d dots", number))
+	w := a.NewWindow(fmt.Sprintf("Die face: %d", number))
 
-	layout := number2layout[number]
-	if layout == nil {
+	layout, ok := faceLayouts[number]
+	if !ok {
 		log.Fatalf("No layout for number %d", number)
 	}
 
-	face := container.New(layout, newDot())
+	face := container.New(layout, makeDots(number)...)
 	bg := canvas.NewRectangle(color.White)
 
 	w.SetContent(container.NewStack(bg, face))
